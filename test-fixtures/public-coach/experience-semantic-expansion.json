@@ -1,0 +1,21 @@
+{
+  "provenance": {
+    "fictional": true,
+    "kind": "synthetic-adversarial-regression",
+    "description": "全新虚构的负向回归输入，不是实际用户资料、历史模型输出或真实模型质量证据。"
+  },
+  "requests": [
+    {
+      "phase": "original",
+      "body": {
+        "content": "{\"strengths\":[\"说明了自己整理需求的职责。\"],\"issues\":[\"应当区分自述与已确认资料。\"],\"factRisks\":[],\"suggestions\":[\"把需求清单写成已用于上线决策的产物。\"],\"answerStructure\":\"先说访谈，再说需求清单已用于安排研发工作。\",\"studyTopics\":[\"职责边界\"],\"optimizedExample\":\"我整理需求清单，模型研发和上线由同伴负责，清单随后用于上线安排。\"}"
+      }
+    },
+    {
+      "phase": "revised",
+      "body": {
+        "content": "{\"strengths\":[\"说明了自己整理需求的职责。\"],\"issues\":[\"应当区分自述与已确认资料。\"],\"factRisks\":[],\"suggestions\":[\"把需求清单写成已用于上线决策的产物。\"],\"answerStructure\":\"先说访谈，再说需求清单已用于安排研发工作。\",\"studyTopics\":[\"职责边界\"],\"optimizedExample\":\"我整理需求清单，模型研发和上线由同伴负责，清单随后用于上线安排。\"}"
+      }
+    }
+  ]
+}

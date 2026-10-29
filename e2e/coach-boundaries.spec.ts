@@ -1,0 +1,123 @@
+import { libraryArea, openDetails } from "./uiActions";
+import { expect, test, type Page } from "@playwright/test";
+import { readFileSync } from "node:fs";
+import { nextTurn } from "../src/lib/interview";
+import { updateProjectFromSession } from "../src/lib/projects";
+
+const source = JSON.parse(readFileSync(new URL("../test-fixtures/public-coach/03-experience.json", import.meta.url), "utf8"));
+const prior = JSON.parse(readFileSync(new URL("../test-fixtures/public-coach/experience-internal-note.json", import.meta.url), "utf8"));
+const bad = JSON.parse(prior.requests.find((r: any) => r.phase === "revised").body.content);
+const closeout = JSON.parse(readFileSync(new URL("../test-fixtures/public-coach/experience-semantic-expansion.json", import.meta.url), "utf8"));
+const naturalBad = JSON.parse(closeout.requests[0].body.content);
+const manualFinal = "本人负责客户需求访谈并形成需求清单，没有负责模型研发或上线。";
+const review = (page: Page) => page.locator("section").filter({ has: page.getByRole("heading", { name: "点评 → 重答 → 对比", exact: true }) }).last();
+async function open(page: Page) {
+  await page.goto("/"); await page.getByRole("button", { name: "查看岗位", exact: true }).click(); await page.getByRole("button", { name: "面试训练", exact: true }).click();
+}
+
+test("P1-F：虚构坏输出不进入经历表达三字段，手工最终版及重答点评刷新保持", async ({ page }, testInfo) => {
+  const errors: string[] = [];
+  page.on("pageerror", error => errors.push(error.message));
+  page.on("console", message => { if (message.type() === "error") errors.push(message.text()); });
+  const project = updateProjectFromSession(source.fixture.project, nextTurn(source.fixture.project.session, source.revisedAnswer, { action: "next" }));
+  project.session!.turns[0].finalAnswer = manualFinal;
+  await page.addInitScript(({ project, profile }) => {
+    if (!localStorage.getItem("ai-interview-projects-v1")) localStorage.setItem("ai-interview-projects-v1", JSON.stringify([project]));
+    if (!localStorage.getItem("ai-interview-profile-v1")) localStorage.setItem("ai-interview-profile-v1", JSON.stringify(profile));
+  }, { project, profile: source.fixture.profile });
+  await page.route("**/api/health", route => route.fulfill({ json: { modelConfigured: true, provider: "匿名边界测试" } }));
+  let calls = 0;
+  await page.route("**/api/model/chat", route => {
+    calls++;
+    const feedback = calls === 1 ? bad : naturalBad;
+    return route.fulfill({ json: { content: JSON.stringify(feedback) } });
+  });
+  await open(page);
+  await review(page).getByRole("button", { name: "请求 AI 点评", exact: true }).click();
+  await expect(review(page).getByRole("heading", { name: "AI 教练反馈", exact: true })).toBeVisible();
+  // Open details: an absent accessible button in a closed <details> is not proof it cannot be copied.
+  await review(page).getByText("AI 补充建议与示例（需本人核对）", { exact: true }).click();
+  await expect(review(page).getByRole("button", { name: "复制到待确认答案草稿", exact: true })).toHaveCount(0);
+  await expect(review(page).getByRole("alert").filter({ hasText: "AI 示例含内部事实核对说明" })).toBeVisible();
+  await expect(review(page).getByRole("alert").filter({ hasText: "经历题暂不自动生成" })).toBeVisible();
+  await expect(review(page).getByRole("region", { name: "当前回答反馈" }).getByText(/先说明本人已确认的职责与行动/)).toBeVisible();
+  await expect(review(page).getByText(/本轮新增的负责人、用途、数字和行动先与经历资料核对/)).toBeVisible();
+  await expect(review(page).getByText(bad.answerStructure, { exact: true })).toHaveCount(0);
+  for (const suggestion of bad.suggestions) await expect(review(page).getByText(suggestion, { exact: true })).toHaveCount(0);
+  await review(page).screenshot({ path: testInfo.outputPath("p1f-experience-guidance.png") });
+  await page.reload(); await page.getByRole("button", { name: "查看岗位", exact: true }).click(); await page.getByRole("button", { name: "面试训练", exact: true }).click();
+  await openDetails(page, "保存我的回答思路");
+  await expect(review(page).getByRole("textbox", { name: "最终确认答案", exact: true })).toHaveValue(manualFinal);
+  await expect(review(page).getByRole("button", { name: "复制到待确认答案草稿", exact: true, includeHidden: true })).toHaveCount(0);
+  await review(page).getByRole("textbox", { name: "同题重答", exact: true }).fill(manualFinal);
+  await review(page).getByRole("button", { name: "保存重答并对比", exact: true }).click();
+  await review(page).getByRole("button", { name: "请求 AI 点评", exact: true }).click();
+  await expect(review(page).getByRole("heading", { name: "AI 教练反馈", exact: true })).toBeVisible();
+  await review(page).getByText("AI 补充建议与示例（需本人核对）", { exact: true }).click();
+  await expect(review(page).getByRole("button", { name: "复制到待确认答案草稿", exact: true, includeHidden: true })).toHaveCount(0);
+  await expect(review(page).getByText(naturalBad.answerStructure, { exact: true })).toHaveCount(0);
+  await expect(review(page).getByText(naturalBad.optimizedExample, { exact: true })).toHaveCount(0);
+  for (const suggestion of naturalBad.suggestions) await expect(review(page).getByText(suggestion, { exact: true })).toHaveCount(0);
+  const editedFinal = "我负责客户需求访谈并形成需求清单，没有负责模型研发或上线。";
+  await openDetails(page, "保存我的回答思路");
+  await review(page).getByRole("textbox", { name: "最终确认答案", exact: true }).fill(editedFinal);
+  await review(page).getByRole("button", { name: "保存最终答案", exact: true }).click();
+  await expect(review(page).getByRole("status")).toContainText("最终确认答案已保存");
+  await page.reload(); await page.getByRole("button", { name: "查看岗位", exact: true }).click(); await page.getByRole("button", { name: "面试训练", exact: true }).click();
+  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem("ai-interview-projects-v1")!)[0]);
+  expect(saved.session.turns[0].answer).toBe(source.revisedAnswer);
+  expect(saved.session.turns[0].finalAnswer).toBe(editedFinal);
+  expect(saved.session.turns[0].revisions[0].answer).toBe(manualFinal);
+  expect(saved.session.turns[0].coachReviews.map((r: any) => [r.answerVersion, r.feedback.optimizedExample])).toEqual([[1, ""], [2, ""]]);
+  expect(saved.session.turns[0].coachReviews.map((r: any) => r.answer)).toEqual([source.revisedAnswer, manualFinal]);
+  expect(calls).toBe(2);
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("ai-interview-profile-v1")!))).toEqual(source.fixture.profile);
+  await openDetails(page, "保存我的回答思路");
+  await expect(review(page).getByRole("textbox", { name: "最终确认答案", exact: true })).toHaveValue(editedFinal);
+  await review(page).screenshot({ path: testInfo.outputPath("p1f-manual-final-refreshed.png") });
+  expect(errors).toEqual([]);
+});
+
+for (const mode of ["knowledge", "hypothetical"] as const) test(`P1-F：${mode} 保留教学与草稿选择权，不自动确认个人事实`, async ({ page }, testInfo) => {
+  const errors: string[] = [];
+  page.on("pageerror", error => errors.push(error.message));
+  page.on("console", message => { if (message.type() === "error") errors.push(message.text()); });
+  const fixture = structuredClone(source.fixture.project);
+  const question = { ...fixture.preparation.questions[0], text: mode === "knowledge" ? "RAG 的检索与生成分别如何评测？" : "如果负责 RAG 试点，你会如何设计？", technical: true, category: "技术理解", sourceType: "foundation" };
+  fixture.preparation.questions = [question];
+  fixture.session.preparation = fixture.preparation;
+  fixture.session.questions = [question];
+  const original = mode === "knowledge" ? "我还没有独立完成过 RAG 评测。" : "我没有做过 RAG 项目。如果由我负责，我会先整理数据并做小范围验证。";
+  const project = updateProjectFromSession(fixture, nextTurn(fixture.session, original, { action: "next" }));
+  project.session!.turns[0].finalAnswer = manualFinal;
+  const feedback = { strengths: [], issues: ["先区分要解决的问题。"], factRisks: [], studyTopics: ["检索与生成评测"], suggestions: ["先检查证据是否相关，再检查回答是否依据证据。"], answerStructure: "请假制度问答可以分两步检查：先找对制度，再依据制度回答。找到证据却答错与没有找到证据有什么区别？", optimizedExample: mode === "knowledge" ? "检索质量关注证据是否相关，生成质量关注回答是否依据证据。" : "如果由我负责，我会先确定试点问题，再整理相应资料并检查回答依据。" };
+  await page.addInitScript(({ project, profile }) => {
+    if (!localStorage.getItem("ai-interview-projects-v1")) localStorage.setItem("ai-interview-projects-v1", JSON.stringify([project]));
+    if (!localStorage.getItem("ai-interview-profile-v1")) localStorage.setItem("ai-interview-profile-v1", JSON.stringify(profile));
+  }, { project, profile: source.fixture.profile });
+  await page.route("**/api/health", route => route.fulfill({ json: { modelConfigured: true, provider: "匿名边界测试" } }));
+  let calls = 0;
+  await page.route("**/api/model/chat", route => { calls++; return route.fulfill({ json: { content: JSON.stringify(feedback) } }); });
+  await open(page);
+  await review(page).getByRole("button", { name: "请求 AI 点评", exact: true }).click();
+  await expect(review(page).getByRole("region", { name: "当前回答反馈" }).getByText(feedback.answerStructure, { exact: true })).toBeVisible();
+  await review(page).getByText("AI 补充建议与示例（需本人核对）", { exact: true }).click();
+  await expect(review(page).getByText(feedback.suggestions[0], { exact: true })).toBeVisible();
+  if (mode === "hypothetical") await expect(review(page).getByText(/未来假设方案（AI 教学示例，不是已完成经历）/)).toBeVisible();
+  await openDetails(page, "保存我的回答思路");
+  await expect(review(page).getByRole("textbox", { name: "最终确认答案", exact: true })).toHaveValue(manualFinal);
+  await review(page).getByRole("button", { name: "复制到待确认答案草稿", exact: true }).click();
+  await openDetails(page, "保存我的回答思路");
+  await expect(review(page).getByRole("textbox", { name: "最终确认答案", exact: true })).toHaveValue(mode === "knowledge" ? feedback.optimizedExample : `未来假设方案（AI 教学示例，不是已完成经历）：\n${feedback.optimizedExample}`);
+  await review(page).screenshot({ path: testInfo.outputPath(`p1f-${mode}-teaching.png`) });
+  await page.reload();
+  await page.getByRole("button", { name: "查看岗位", exact: true }).click();
+  await page.getByRole("button", { name: "面试训练", exact: true }).click();
+  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem("ai-interview-projects-v1")!)[0].session.turns[0]);
+  expect(saved.answer).toBe(original);
+  expect(saved.finalAnswer).toBe(manualFinal);
+  expect(saved.coachReviews[0].feedback.answerStructure).toBe(feedback.answerStructure);
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("ai-interview-profile-v1")!))).toEqual(source.fixture.profile);
+  expect(calls).toBe(1);
+  expect(errors).toEqual([]);
+});

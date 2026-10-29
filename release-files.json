@@ -1,0 +1,32 @@
+{
+  "description": "Reviewed source publication scope. Internal docs and historical coach outputs remain local. Native Git ignore results must agree with this manifest. LICENSE remains an owner decision.",
+  "files": [
+    ".env.example",
+    ".gitignore",
+    "README.md",
+    "LICENSE",
+    "SECURITY.md",
+    "GLOSSARY.md",
+    "package.json",
+    "package-lock.json",
+    "server.ts",
+    "vite.config.ts",
+    "playwright.config.ts",
+    "tsconfig.json",
+    "components.json",
+    "index.html",
+    "metadata.json",
+    "release-files.json",
+    "THIRD_PARTY_NOTICES.md",
+    "GITHUB_SYNC.md"
+  ],
+  "directories": [
+    "src",
+    "e2e",
+    "scripts",
+    "test-fixtures"
+  ],
+  "excludedDirectories": [
+    "test-fixtures/coach"
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "provenance": {
+    "fictional": true,
+    "kind": "synthetic-adversarial-regression",
+    "description": "全新虚构的负向回归输入，不是实际用户资料、历史模型输出或真实模型质量证据。"
+  },
+  "requests": [
+    {
+      "phase": "revised",
+      "body": {
+        "content": "{\"strengths\":[\"说明了自己整理需求的职责。\"],\"issues\":[\"应当区分自述与已确认资料。\"],\"factRisks\":[],\"suggestions\":[\"把需求清单写成已用于上线决策的产物。\"],\"answerStructure\":\"先说明整理需求清单，便于后续核对优先级，再说交付安排。\",\"studyTopics\":[\"职责边界\"],\"optimizedExample\":\"我形成了需求清单。资料中没有依据，请确认或删除。\"}"
+      }
+    }
+  ]
+}

@@ -1,0 +1,152 @@
+# 默认不上传根目录内容，仅放行下方明确列出的源码和配置。
+# 本文件不会删除本地文件，也不会清除已经提交到 Git 的文件或历史。
+/*
+
+# 项目源码、测试代码及工具
+!/src/
+!/e2e/
+!/scripts/
+!/test-fixtures/
+
+# 根目录公开说明与许可证（放行不表示文件已经存在或已经获得授权）
+!/.gitignore
+!/.env.example
+!/README.md
+!/LICENSE
+!/LICENSE.txt
+!/SECURITY.md
+!/THIRD_PARTY_NOTICES.md
+!/NOTICE
+!/GLOSSARY.md
+
+# 安装、构建及现有工具配置
+!/package.json
+!/package-lock.json
+!/server.ts
+!/index.html
+!/vite.config.ts
+!/tsconfig.json
+!/playwright.config.ts
+!/components.json
+!/metadata.json
+!/release-files.json
+# 仅为后续经过验证的 Vercel 配置预留，不表示部署已经完成
+# /vercel.json requires an explicit review before allowlisting
+
+# 测试材料只公开说明及完全虚构的 JSON 夹具
+/test-fixtures/*
+!/test-fixtures/README.md
+!/test-fixtures/public-coach/
+/test-fixtures/public-coach/*
+!/test-fixtures/public-coach/*.json
+/test-fixtures/coach/
+
+# 内部文档、演示准备、设计稿、私人备份和本地配置不公开
+/docs/
+/designs/
+.local-backups/
+.local-usage/
+.codex/
+.agents/
+.vscode/
+.vercel/
+AGENTS.md
+D_ai-interview-prep/
+
+# 依赖、构建产物、覆盖率及缓存
+node_modules/
+dist/
+build/
+coverage/
+.vite/
+playwright/.cache/
+
+# 所有带后缀的 Playwright 历史报告和运行结果
+playwright-report*/
+test-results*/
+blob-report*/
+
+# 日志、录像、网络记录、证书、临时文件
+*.log
+*.jsonl
+*.trace
+*trace*.zip
+*.webm
+*.mp4
+*.har
+*.pem
+*.key
+*.p12
+*.pfx
+*.bak
+*.tmp
+.DS_Store
+Thumbs.db
+
+# 所有真实环境配置均排除；仅根目录空密钥示例可以公开
+.env*
+!/.env.example
+
+
+# 持续同步审计与其他工具缓存（报告含本地文件名，不公开）
+.local-publication-audit/
+.npm/
+.cache/
+__pycache__/
+*.pyc
+*.tsbuildinfo
+.eslintcache
+*.swp
+*.swo
+.idea/
+.history/
+.auth/
+playwright/.auth/
+
+# 即使出现在已放行源码目录内，私人输入、凭据和原件仍排除
+private/
+personal/
+uploads/
+originals/
+resumes/
+backups/
+credentials.json
+secrets.json
+.npmrc
+.netrc
+*.pdf
+*.doc
+*.docx
+*.xls
+*.xlsx
+*.ppt
+*.pptx
+*.zip
+*.7z
+*.rar
+*.sqlite*
+*.db
+*.csv
+*.jsonl
+*.png
+*.jpg
+*.jpeg
+*.webp
+
+# 工具只放行已审查的文件，避免随手保存的数据进入 scripts
+/scripts/*
+!/scripts/release-preview.mjs
+!/scripts/usage-report.ts
+!/scripts/github-sync-check.mjs
+
+# 虚构夹具也按文件放行，新增夹具需先审查
+/test-fixtures/public-coach/*
+!/test-fixtures/public-coach/02-rag-evaluation.json
+!/test-fixtures/public-coach/03-experience.json
+!/test-fixtures/public-coach/04-discovery.json
+!/test-fixtures/public-coach/05-dont-know.json
+!/test-fixtures/public-coach/06-hypothetical.json
+!/test-fixtures/public-coach/experience-internal-note.json
+!/test-fixtures/public-coach/experience-semantic-expansion.json
+
+!/GITHUB_SYNC.md

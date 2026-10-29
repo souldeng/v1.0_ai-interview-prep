@@ -1,0 +1,225 @@
+{
+  "provenance": {
+    "fictional": true,
+    "kind": "synthetic-adversarial-regression",
+    "description": "全新虚构的负向回归输入，不是实际用户资料、历史模型输出或真实模型质量证据。"
+  },
+  "question": "请介绍你在纸页制度手册需求梳理中的职责。",
+  "originalAnswer": "我访谈使用者并整理需求清单，没有负责模型研发或上线。",
+  "revisedAnswer": "在虚构的纸页演练中，我访谈使用者并整理需求清单；研发由同伴负责，我没有负责模型研发或上线。",
+  "fixture": {
+    "project": {
+      "id": "synthetic-project",
+      "company": "纸页演练组织（虚构）",
+      "jobTitle": "需求整理练习岗位（虚构）",
+      "jobDescription": "负责整理虚构纸页制度手册的使用需求。",
+      "candidateBackground": "",
+      "concerns": "",
+      "analysis": null,
+      "questions": [
+        {
+          "id": "synthetic-03-experience",
+          "category": "经历复盘",
+          "question": "请介绍你在纸页制度手册需求梳理中的职责。",
+          "whyAsk": "完全虚构的回归样本",
+          "answerGuide": [
+            "说明背景与目标",
+            "突出你的具体行动",
+            "用可验证的结果和复盘收束"
+          ],
+          "difficulty": "medium",
+          "status": "unanswered",
+          "userAnswer": "",
+          "feedback": null,
+          "followUpQuestions": [],
+          "score": null
+        }
+      ],
+      "status": "ready",
+      "completedQuestions": 0,
+      "totalQuestions": 1,
+      "createdAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z",
+      "lastPracticedAt": null,
+      "preparation": {
+        "id": "synthetic-preparation",
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "resume": {
+          "raw": "",
+          "summary": "",
+          "skills": [],
+          "evidence": []
+        },
+        "job": {
+          "raw": "负责整理虚构纸页制度手册的使用需求。",
+          "title": "",
+          "requirements": [
+            "负责整理虚构纸页制度手册的使用需求"
+          ]
+        },
+        "matrix": [
+          {
+            "capability": "大模型应用与技术理解",
+            "requirement": "JD 未明确展开「大模型应用与技术理解」",
+            "evidence": "",
+            "status": "gap",
+            "gap": "简历未发现相关经历，请如实补充学习或项目计划"
+          },
+          {
+            "capability": "客户需求与方案设计",
+            "requirement": "负责整理虚构纸页制度手册的使用需求",
+            "evidence": "",
+            "status": "gap",
+            "gap": "简历未发现相关经历，请如实补充学习或项目计划"
+          },
+          {
+            "capability": "POC 与项目交付",
+            "requirement": "JD 未明确展开「POC 与项目交付」",
+            "evidence": "",
+            "status": "gap",
+            "gap": "简历未发现相关经历，请如实补充学习或项目计划"
+          },
+          {
+            "capability": "跨团队协作",
+            "requirement": "JD 未明确展开「跨团队协作」",
+            "evidence": "",
+            "status": "gap",
+            "gap": "简历未发现相关经历，请如实补充学习或项目计划"
+          },
+          {
+            "capability": "数据与工程工具",
+            "requirement": "JD 未明确展开「数据与工程工具」",
+            "evidence": "",
+            "status": "gap",
+            "gap": "简历未发现相关经历，请如实补充学习或项目计划"
+          }
+        ],
+        "questions": [
+          {
+            "id": "synthetic-03-experience",
+            "text": "请介绍你在纸页制度手册需求梳理中的职责。",
+            "technical": false,
+            "category": "经历复盘",
+            "sourceType": "resume",
+            "source": "完全虚构的回归样本"
+          }
+        ]
+      },
+      "session": {
+        "id": "synthetic-session",
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "preparation": {
+          "id": "synthetic-preparation",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "resume": {
+            "raw": "",
+            "summary": "",
+            "skills": [],
+            "evidence": []
+          },
+          "job": {
+            "raw": "负责整理虚构纸页制度手册的使用需求。",
+            "title": "",
+            "requirements": [
+              "负责整理虚构纸页制度手册的使用需求"
+            ]
+          },
+          "matrix": [
+            {
+              "capability": "大模型应用与技术理解",
+              "requirement": "JD 未明确展开「大模型应用与技术理解」",
+              "evidence": "",
+              "status": "gap",
+              "gap": "简历未发现相关经历，请如实补充学习或项目计划"
+            },
+            {
+              "capability": "客户需求与方案设计",
+              "requirement": "负责整理虚构纸页制度手册的使用需求",
+              "evidence": "",
+              "status": "gap",
+              "gap": "简历未发现相关经历，请如实补充学习或项目计划"
+            },
+            {
+              "capability": "POC 与项目交付",
+              "requirement": "JD 未明确展开「POC 与项目交付」",
+              "evidence": "",
+              "status": "gap",
+              "gap": "简历未发现相关经历，请如实补充学习或项目计划"
+            },
+            {
+              "capability": "跨团队协作",
+              "requirement": "JD 未明确展开「跨团队协作」",
+              "evidence": "",
+              "status": "gap",
+              "gap": "简历未发现相关经历，请如实补充学习或项目计划"
+            },
+            {
+              "capability": "数据与工程工具",
+              "requirement": "JD 未明确展开「数据与工程工具」",
+              "evidence": "",
+              "status": "gap",
+              "gap": "简历未发现相关经历，请如实补充学习或项目计划"
+            }
+          ],
+          "questions": [
+            {
+              "id": "synthetic-03-experience",
+              "text": "请介绍你在纸页制度手册需求梳理中的职责。",
+              "technical": false,
+              "category": "经历复盘",
+              "sourceType": "resume",
+              "source": "完全虚构的回归样本"
+            }
+          ]
+        },
+        "questions": [
+          {
+            "id": "synthetic-03-experience",
+            "text": "请介绍你在纸页制度手册需求梳理中的职责。",
+            "technical": false,
+            "category": "经历复盘",
+            "sourceType": "resume",
+            "source": "完全虚构的回归样本"
+          }
+        ],
+        "currentQuestionIndex": 0,
+        "awaitingFollowUp": false,
+        "status": "active",
+        "turns": []
+      },
+      "materials": [
+        {
+          "id": "synthetic-third-party",
+          "projectId": "synthetic-project",
+          "kind": "interview_experience",
+          "title": "虚构他人面经",
+          "content": "虚构他人自述：我落地了20个项目。此内容不属于当前用户事实。",
+          "source": "manual_text",
+          "reviewedAt": "2026-01-01T00:00:00.000Z",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "updatedAt": "2026-01-01T00:00:00.000Z"
+        }
+      ]
+    },
+    "profile": {
+      "version": 1,
+      "supplementaryInfo": "",
+      "resumes": [],
+      "experiences": [
+        {
+          "id": "synthetic-card",
+          "title": "纸页需求演练（虚构）",
+          "situation": "完全虚构的制度手册需求访谈练习。",
+          "action": "本人负责客户需求访谈并形成需求清单，没有负责模型研发或上线。",
+          "result": "需求清单",
+          "reflection": "明确自己的职责边界。",
+          "confirmed": true,
+          "origin": "manual",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "updatedAt": "2026-01-01T00:00:00.000Z"
+        }
+      ],
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    }
+  }
+}

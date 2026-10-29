@@ -1,0 +1,36 @@
+import {expect,test,type Page} from "@playwright/test";
+import {openDetails} from "./uiActions";
+const now="2026-10-25T00:00:00Z";
+const card={id:"exp-enhance",title:"匿名需求访谈",situation:"了解需求",action:"访谈客户并整理清单",result:"形成清单，未负责上线",reflection:"明确职责",confirmed:true,createdAt:now,updatedAt:now};
+async function enter(page:Page){const menu=page.getByRole("button",{name:"打开导航"});if(await menu.isVisible())await menu.click();await page.getByRole("button",{name:/AI 面试题库/}).first().click();await page.getByRole("button",{name:"简历专项",exact:true}).click();await page.getByRole("button",{name:card.title,exact:true}).click();}
+test("重新生成失败保留原组，成功换组/追加去重/删除刷新不改旧训练",async({page},info)=>{
+  await page.addInitScript(card=>{if(!localStorage.getItem("ai-interview-profile-v1"))localStorage.setItem("ai-interview-profile-v1",JSON.stringify({version:1,supplementaryInfo:"",resumes:[],experiences:[card],updatedAt:card.updatedAt}));},card);
+  await page.route("**/api/health",r=>r.fulfill({json:{modelConfigured:true}}));let calls=0;
+  const original=["如何访谈？","如何整理清单？","如何明确职责？"], replacement=["需求如何排序？","遇到什么困难？","如何复盘访谈？"];
+  await page.route("**/api/model/chat",route=>{const req=route.request().postDataJSON();if(req.feature==="interview_followup")return route.fulfill({json:{content:'{"action":"next"}'}});if(req.feature==="interview_feedback")return route.fulfill({json:{content:JSON.stringify({strengths:["说明了本人行动"],issues:[],factRisks:[],suggestions:[],answerStructure:"说明本人职责",studyTopics:[],optimizedExample:""})}});calls++;if(calls===2)return route.fulfill({status:503,json:{error:"匿名失败"}});const texts=calls===1?original:calls===3?replacement:[replacement[0],"如何确认需求？","如何处理分歧？"];return route.fulfill({json:{content:JSON.stringify({questions:texts.map(text=>({text,basisQuote:card.action}))})}})});
+  page.on("dialog",d=>d.accept());
+  await page.goto("/");await enter(page);await page.getByRole("button",{name:"生成专项题",exact:true}).click();
+  await expect(page.getByRole("heading",{name:original[0],exact:true})).toBeVisible();
+  await page.getByRole("button",{name:"重新生成",exact:true}).click();await expect(page.getByRole("alert").filter({hasText:"503"})).toBeVisible();
+  await expect(page.getByRole("heading",{name:original[0],exact:true})).toBeVisible();
+  await page.getByRole("button",{name:"重新生成",exact:true}).click();await expect(page.getByRole("heading",{name:replacement[0],exact:true})).toBeVisible();
+  await page.getByRole("button",{name:"继续生成",exact:true}).click();await expect(page.getByText("本次新增 2 道题，已保存。",{exact:true})).toBeVisible();
+  await expect(page.getByRole("button",{name:"开始练习",exact:true})).toHaveCount(5);
+  await page.getByRole("button",{name:"删除题目 1",exact:true}).click();await expect(page.getByRole("button",{name:"开始练习",exact:true})).toHaveCount(4);
+  await page.getByRole("button",{name:"撤销删除",exact:true}).click();await expect(page.getByRole("button",{name:"开始练习",exact:true})).toHaveCount(5);
+  await page.getByRole("button",{name:"删除题目 1",exact:true}).click();
+  await page.evaluate(()=>window.scrollTo(0,0));
+  await page.screenshot({path:info.outputPath("experience-enhanced.png"),fullPage:true});
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBe(true);
+  await page.reload();await enter(page);await expect(page.getByRole("button",{name:"开始练习",exact:true})).toHaveCount(4);expect(calls).toBe(4);
+  const data=await page.evaluate(()=>JSON.parse(localStorage.getItem("ai-interview-question-library-v1")!));expect(data.experienceSets).toHaveLength(2);expect(data.experienceSets[0].questions[0].text).toBe(original[0]);
+  await page.getByRole("button",{name:"开始练习",exact:true}).first().click();
+  await page.getByLabel("本轮回答",{exact:true}).fill("我访谈客户并整理清单，未负责上线。");await page.getByRole("button",{name:"提交回答",exact:true}).click();
+  await expect(page.getByText("说明了本人行动",{exact:true})).toBeVisible();await openDetails(page,"保存我的回答思路");
+  await page.getByRole("textbox",{name:"最终确认答案",exact:true}).fill("说明本人访谈动作、清单和责任边界。");await page.getByRole("button",{name:"保存最终答案",exact:true}).click();
+  await page.getByRole("button",{name:"返回经历题组",exact:true}).click();
+  const history=await page.evaluate(()=>localStorage.getItem("ai-interview-prep-history-v1"));
+  await page.getByRole("button",{name:"删除题目 1",exact:true}).click();expect(await page.evaluate(()=>localStorage.getItem("ai-interview-prep-history-v1"))).toBe(history);
+  await page.reload();await enter(page);await expect(page.getByRole("button",{name:"开始练习",exact:true})).toHaveCount(3);
+  await openDetails(page,"我的专项回答与复习");await expect(page.getByRole("textbox",{name:"最终确认答案",exact:true})).toHaveValue("说明本人访谈动作、清单和责任边界。");expect(calls).toBe(4);
+});
