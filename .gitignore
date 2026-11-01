@@ -31,7 +31,7 @@
 !/metadata.json
 !/release-files.json
 # 仅为后续经过验证的 Vercel 配置预留，不表示部署已经完成
-# /vercel.json requires an explicit review before allowlisting
+!/vercel.json
 
 # 测试材料只公开说明及完全虚构的 JSON 夹具
 /test-fixtures/*
@@ -86,7 +86,6 @@ Thumbs.db
 # 所有真实环境配置均排除；仅根目录空密钥示例可以公开
 .env*
 !/.env.example
-
 
 # 持续同步审计与其他工具缓存（报告含本地文件名，不公开）
 .local-publication-audit/

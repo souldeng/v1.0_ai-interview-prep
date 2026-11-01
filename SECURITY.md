@@ -12,9 +12,9 @@
 
 ## 报告安全问题
 
-当前尚未配置私密漏洞报告渠道。请不要在公开 Issue 中提交密钥、真实资料、完整 Prompt、trace、录像或可利用的复现载荷。
+私密漏洞报告渠道的启用状态尚未核实。请不要在公开 Issue 中提交密钥、真实资料、完整 Prompt、trace、录像或可利用的复现载荷。
 
-计划使用 GitHub Private Vulnerability Reporting：需要仓库创建后，由维护者在仓库安全设置中启用，再通过 Security → Report a vulnerability 私密报告。当前尚无仓库，该渠道尚未启用。启用前请保留敏感细节，不要通过公开 Issue 报告漏洞载荷或私人数据。这里不承诺尚未建立的响应时限、奖励计划或安全支持周期。
+计划使用 GitHub Private Vulnerability Reporting：需要仓库创建后，由维护者在仓库安全设置中启用，再通过 Security → Report a vulnerability 私密报告。GitHub 仓库现已建立；私密漏洞报告功能是否启用尚待维护者核实，本说明不表示该渠道已经可用。启用前请保留敏感细节，不要通过公开 Issue 报告漏洞载荷或私人数据。这里不承诺尚未建立的响应时限、奖励计划或安全支持周期。
 
 ## 依赖与验证
 

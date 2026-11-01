@@ -118,9 +118,11 @@ npm test
 npm run build
 ```
 
-`lint` 实际执行 TypeScript 类型检查，不是独立 ESLint。浏览器测试见 [Playwright 说明](e2e/README.md)。
+`lint` 实际执行 TypeScript 类型检查，不是独立 ESLint。
 
-自动化测试使用仓库内完全虚构的公开夹具；七份历史模型输出仅留在本地，不参与公开版本测试。Mock 回归不代表真实模型教学质量。每次提交前执行 `npm run sync:check`；操作与公开边界见 [GitHub 持续同步](GITHUB_SYNC.md)。
+自动化测试使用仓库内完全虚构的公开夹具；七份历史模型输出仅留在本地，不参与公开版本测试。Mock 回归不代表真实模型教学质量。
+
+每次提交前执行 `npm run sync:check`，检查本地源码、Git 暂存内容与历史。单目录维护步骤见 [GitHub 持续同步](GITHUB_SYNC.md)。
 
 ## 📊 服务端 Token 与成本监控
 
@@ -167,13 +169,10 @@ npm run usage -- --details
 
 后续重点是改善操作体验、验证资料整理与教学质量、优化响应和 Token 成本，以及完善真实场景验收，而不是继续增加复杂系统。
 
-公开测试使用完全虚构的匿名夹具；内部演示准备与验收记录留在本地，不作为真实客户或求职成果。
 
 ## 📄 开源许可
 
-**项目许可证尚待所有者确认，当前目录没有项目 LICENSE，不能视为已授予开源复用许可。**确认后应在根目录补齐 LICENSE 并更新发布状态。
-
-第三方依赖及素材遵循各自条款，见 [第三方通知](THIRD_PARTY_NOTICES.md)。未授权的历史模型输出暂不公开；持续同步边界见 [说明](GITHUB_SYNC.md)。
+项目采用 [MIT License](LICENSE)。第三方依赖及素材保留各自条款，见 [第三方通知](THIRD_PARTY_NOTICES.md)。许可证不覆盖私人材料或未获授权的第三方内容。
 
 ---
 

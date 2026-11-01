@@ -1,5 +1,5 @@
 {
-  "description": "Reviewed source publication scope. Internal docs and historical coach outputs remain local. Native Git ignore results must agree with this manifest. LICENSE remains an owner decision.",
+  "description": "Reviewed public source scope. Internal docs and historical outputs remain local. Validate working files, Git index and history with npm run sync:check before every commit.",
   "files": [
     ".env.example",
     ".gitignore",
@@ -17,8 +17,8 @@
     "index.html",
     "metadata.json",
     "release-files.json",
-    "THIRD_PARTY_NOTICES.md",
-    "GITHUB_SYNC.md"
+    "GITHUB_SYNC.md",
+    "THIRD_PARTY_NOTICES.md"
   ],
   "directories": [
     "src",

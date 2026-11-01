@@ -12,15 +12,15 @@ npm run sync:check
 npm run sync:check -- --baseline "你的公开版目录"
 ```
 
-检查器使用临时 Git 数据库验证原生忽略规则，不初始化项目仓库、不暂存、不提交、不推送、不复制文件到公开版。仅将本地报告写到已忽略的 `.local-publication-audit/`。
+检查器使用临时 Git 数据库验证原生忽略规则，不初始化项目仓库、不暂存、不提交、不推送、不复制文件到公开版。仅将本地报告写到已忽略的 `.local-publication-audit/`。默认无需公开副本，日常只维护当前目录；`--baseline` 仅用于可选的旧副本比较。
 
-- `upload-files.txt`、`upload-manifest.csv`：当前存在且未被忽略的文件，附大小与 SHA-256。
+- `upload-files.txt`、`upload-manifest.csv`：工作区候选及 SHA-256；`tracked-files.txt` 为真实 Git 跟踪范围。检查通过要求候选、发布清单与跟踪路径逐项一致。
 - `ignored-files.csv`：每个已忽略文件及实际匹配规则。
 - `comparison.csv`：与指定公开副本的新增、删除和内容差异。
 - `findings.json`：仅记录路径、行号和风险类型，不记录密钥值或匹配正文。
 - `scan-coverage.csv`：内容扫描与跳过范围；`summary.json` 包含 Git 状态、检查边界与阻断项。
 
-退出码非零表示仍有待处理项；退出码零也不代替人工阅读差异、授权确认或 GitHub Desktop 的实际待提交清单。检查器不自动批准发布。
+退出码非零表示仍有待处理项；退出码零也不代替人工阅读差异、授权确认或 GitHub Desktop 的实际待提交清单。检查器还分别扫描暂存内容和可见历史；已经精确核查的两处虚构测试凭据单列，其他密钥及当前本地密钥完整值匹配仍阻断。检查器不自动批准发布。
 
 ## 范围
 
@@ -28,15 +28,16 @@ npm run sync:check -- --baseline "你的公开版目录"
 
 新功能新增文件时，同时核对 `.gitignore` 与 `release-files.json`。源码目录中新增的普通文本仍可能包含私人内容，必须检查差异；不要用 `git add -f` 绕过规则。忽略规则不能移除已跟踪文件或历史泄露内容。
 
-## 首次使用 GitHub Desktop
+## 当前项目的日常操作
 
-1. 先处理检查报告中的密钥、资料、版权和文件完整性问题。项目根目录缺少 LICENSE 时，不把源码公开称为已获得开源复用许可；公开副本的许可证需所有者核对署名和授权后再手工采用。
-2. 若目录已有 Git，在 Desktop 使用 **File → Add local repository** 选择原始开发目录。若没有 Git，该入口会提示创建本地仓库；先确认完整路径就是现有项目，不要误建同名子目录。
-3. 创建本地仓库可能生成初始提交，故操作前先复核清单；不要用模板覆盖已有 `.gitignore`，不要让工具替你选择许可证。创建后核查 History 和 Changes，确认没有 `.env`、内部文档、日志、备份、真实资料等内容。
-4. 对后续更改，在 Changes 阅读逐文件差异、填写说明，再由本人 **Commit to main**（或当前分支）。首次创建的初始提交也应在 History 阅读。
-5. 本人决定发布时使用 **Publish repository**；检查名称、账户与可见性，保留私有选项可先发布 Private。检查完成并确认公开权利后才选择 Public。若已经有远程仓库，应先核对其地址与历史，不重复创建或强行覆盖。
-6. 后续固定循环：修改源码 → 运行检查及相关测试 → Desktop 审阅差异 → Commit → **Push origin**。发布不会自动同步尚未提交的本地更改。
+当前项目已有本地首次提交与 GitHub 远程仓库，继续使用这个开发目录，无需再创建仓库、复制公开副本或重新整理整个项目。
 
-GitHub Desktop 的提交、推送和发布均由本人执行。首次上传前仍须自行检查账号与远程仓库；本说明不表示远程仓库已经创建。
+1. 在当前目录开发，运行 `npm test` 和 `npm run lint`；新增公开文件时核对 `.gitignore` 与 `release-files.json`。
+2. 在 GitHub Desktop 的 Changes 逐文件阅读修改，只选择本次需要提交的文件；不要强制添加被忽略的私人文件。使用命令行时，先暂存明确需要的路径。
+3. 执行 `npm run sync:check`，核对工作区候选、实际 Git 跟踪范围、暂存内容和历史。新增或删除文件时，先更新范围并暂存再检查；检查器不会替你暂存。
+4. 再次阅读将提交的差异，确认没有私人材料或凭据，然后由本人执行 Commit 和 **Push origin**。工具检查通过不代替人工审阅。
+5. 被忽略的本地文件与浏览器原件仍需另行备份，GitHub 源码同步不覆盖它们。
+
+检查报告写入 `.local-publication-audit/` 并留在本地。日常检查不需要 `--baseline`，旧公开副本仅作为可选历史参照。
 
 参考：[添加本地仓库](https://docs.github.com/en/desktop/adding-and-cloning-repositories/adding-a-repository-from-your-local-computer-to-github-desktop)、[发布已有项目](https://docs.github.com/en/desktop/adding-and-cloning-repositories/adding-an-existing-project-to-github-using-github-desktop)。

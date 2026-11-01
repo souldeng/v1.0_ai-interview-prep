@@ -51,7 +51,7 @@ for (const relative of [...files].sort()) {
   output.push({ path: relative, bytes: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex") });
 }
 const ready = errors.length === 0 && blockers.length === 0;
-const result = { ready, files: output, excluded, blockers, errors, warnings, limitations: ["No Git history available to this preview", "Pattern checks do not certify privacy or copyright", "Test reference checks cover current direct/template URL references, not a complete dependency graph", "Excluded historical model outputs remain local and require owner distribution approval", "Project LICENSE remains an owner decision"] };
+const result = { ready, files: output, excluded, blockers, errors, warnings, limitations: ["This file preview does not inspect Git index/history; run npm run sync:check", "Pattern checks do not certify privacy or copyright", "Test reference checks cover current direct/template URL references, not a complete dependency graph", "Excluded historical model outputs remain local and require owner distribution approval", "Project LICENSE remains an owner decision"] };
 if (process.argv.includes("--json")) console.log(JSON.stringify(result, null, 2));
 else {
   console.log(output.map(file => `${file.path}\t${file.bytes}\t${file.sha256}`).join("\n"));

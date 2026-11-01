@@ -6,6 +6,43 @@ import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 
+const patterns = [
+  ['credential_pattern', /\b(?:sk-[A-Za-z0-9_-]{24,}|gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{40,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{20,})\b/],
+  ['private_key', /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/],
+  ['credential_url', /https?:\/\/[^\s/@:]+:[^\s/@]+@/],
+  ['literal_secret_review', /(?:api[_-]?key|access[_-]?token|client[_-]?secret|password|authorization)\s*["']?\s*[:=]\s*["']([A-Za-z0-9_./+=-]{12,})["']/gi],
+  ['email_review', /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/],
+  ['phone_or_id_review', /(?<![\dA-Za-z])(?:1[3-9]\d{9}|[1-9]\d{16}[\dXx])(?![\dA-Za-z])/],
+  ['internal_path_review', /[A-Za-z]:[\\/](?:Users|learn_agent|codex)[\\/]/i],
+  ['merge_conflict', /^(?:<<<<<<< |=======$|>>>>>>> )/],
+];
+export function scanPublicationText(name, body, secrets = []) {
+  const found = [];
+  body.split(/\r?\n/).forEach((line, index) => {
+    if (secrets.some(secret => line.includes(secret))) found.push({ path: name, line: index + 1, kind: 'current_local_secret' });
+    for (const [kind, pattern] of patterns) {
+      // Match every literal on the line: one mock must never hide a second credential.
+      const matches = kind === 'literal_secret_review' ? [...line.matchAll(pattern)] : pattern.test(line) ? [null] : [];
+      for (const match of matches) {
+        const reviewed = kind === 'literal_secret_review' && ['src/services/jsonRequestSafety.test.ts', 'src/services/modelProxy.test.ts'].includes(name) && match?.[1] === ['anonymous', 'test', 'key'].join('-');
+        found.push({ path: name, line: index + 1, kind, ...(reviewed ? { resolution: 'Reviewed fixed fictional credential for local HTTP mock; not a provider key' } : {}) });
+      }
+    }
+  });
+  return found;
+}
+
+// All review decisions originate in the narrow scanner above, never from file-wide exclusions.
+export function unresolvedFindings(findings) {
+  return findings.filter(item => !item.resolution);
+}
+export function publicationDrift(candidates, planned, tracked = null) {
+  const a = new Set(candidates), b = new Set(planned), c = new Set(tracked ?? []);
+  const difference = (left, right) => [...left].filter(name => !right.has(name)).sort();
+  return { gitOnly: difference(a, b), planOnly: difference(b, a), trackedOnly: tracked === null ? [] : difference(c, a), candidateNotTracked: tracked === null ? [] : difference(a, c), trackedNotPlanned: tracked === null ? [] : difference(c, b), plannedNotTracked: tracked === null ? [] : difference(b, c) };
+}
+
+function runAudit() {
 const root = fileURLToPath(new URL('../', import.meta.url));
 const args = process.argv.slice(2);
 const baselineArg = args.indexOf('--baseline');
@@ -50,22 +87,47 @@ function repository(directory) {
   const objects = git(directory, ['rev-list', '--objects', '--all', '--reflog']).stdout.trim().split('\n').filter(Boolean);
   // URLs may contain credentials: report remote names, never their raw values.
   const remotes = git(directory, ['remote']).stdout.trim().split('\n').filter(Boolean);
-  const history = [], seen = new Set();
+  const history = [], seen = new Set(), blobCache = new Map();
+  // Inspect object metadata in one process; history checks should stay usable as refs grow.
+  const objectInfo = new Map();
+  if (objects.length) {
+    const ids = objects.map(object => object.split(' ', 1)[0]);
+    for (const line of git(directory, ['cat-file', '--batch-check'], ids.join('\n') + '\n').stdout.trim().split('\n')) {
+      const [id, type, bytes] = line.split(' ');
+      if (!type || !Number.isFinite(Number(bytes))) throw new Error('Cannot inspect Git object metadata');
+      objectInfo.set(id, { type, bytes: Number(bytes) });
+    }
+  }
   let blobsScanned = 0, blobsSkipped = 0;
   for (const object of objects) {
     const space = object.indexOf(' '), id = space < 0 ? object : object.slice(0, space);
     if (seen.has(id)) continue;
     seen.add(id);
-    if (git(directory, ['cat-file', '-t', id]).stdout.trim() !== 'blob') continue;
+    if (objectInfo.get(id)?.type !== 'blob') continue;
     const name = space < 0 ? '(unnamed blob)' : object.slice(space + 1);
     if (/(?:^|\/)(?:\.env(?!\.example$)|\.local-usage|\.local-backups|uploads|private|resumes)(?:[/.]|$)|\.(?:pdf|docx|jsonl|pem|key|pfx|p12)$/i.test(name)) history.push({ path: name, kind: 'sensitive_history_path' });
-    if (Number(git(directory, ['cat-file', '-s', id]).stdout) > 2 * 1024 * 1024) { blobsSkipped++; continue; }
+    if (objectInfo.get(id).bytes > 2 * 1024 * 1024) { blobsSkipped++; continue; }
     const body = git(directory, ['cat-file', 'blob', id]).stdout;
     if (body.includes('\0')) { blobsSkipped++; continue; }
     blobsScanned++;
+    blobCache.set(id, body);
     history.push(...scanText(name, body).map(item => ({ ...item, object: id })));
   }
-  return { exists: true, tracked, commits: Number(commits || 0), remotes, history, blobsScanned, blobsSkipped, historyScan: 'Reachable refs and reflogs only; excludes unreachable objects and unavailable remote history' };
+  const indexFindings = [], indexUnscanned = [], indexUnsupported = [];
+  let indexBlobsScanned = 0;
+  for (const record of git(directory, ['ls-files', '--stage', '-z']).stdout.split('\0').filter(Boolean)) {
+    const [metadata, name] = record.split('\t'), [mode, id, stage] = metadata.split(' ');
+    if (stage !== '0' || !['100644', '100755'].includes(mode)) { indexUnsupported.push(name); continue; }
+    let body = blobCache.get(id);
+    if (body === undefined) {
+      if (Number(git(directory, ['cat-file', '-s', id]).stdout) > 2 * 1024 * 1024) { indexUnscanned.push(name); continue; }
+      body = git(directory, ['cat-file', 'blob', id]).stdout;
+    }
+    if (body.includes('\0')) { indexUnscanned.push(name); continue; }
+    indexBlobsScanned++;
+    indexFindings.push(...scanText(name, body).map(item => ({ ...item, object: id })));
+  }
+  return { exists: true, tracked, commits: Number(commits || 0), remotes, history, blobsScanned, blobsSkipped, indexFindings, indexBlobsScanned, indexUnscanned, indexUnsupported, historyScan: 'Reachable refs and reflogs only; excludes unreachable objects and unavailable remote history' };
 }
 const source = inventory(root), reference = baseline ? inventory(baseline) : null;
 const secrets = [];
@@ -77,29 +139,10 @@ for (const [name, file] of source.files) {
     if (value && value.length >= 8) secrets.push(value);
   }
 }
-const patterns = [
-  ['credential_pattern', /\b(?:sk-[A-Za-z0-9_-]{24,}|gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{40,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{20,})\b/],
-  ['private_key', /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/],
-  ['credential_url', /https?:\/\/[^\s/@:]+:[^\s/@]+@/],
-  ['literal_secret_review', /(?:api[_-]?key|access[_-]?token|client[_-]?secret|password|authorization)\s*["']?\s*[:=]\s*["'][A-Za-z0-9_./+=-]{12,}["']/i],
-  ['email_review', /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/],
-  ['phone_or_id_review', /(?<![\dA-Za-z])(?:1[3-9]\d{9}|[1-9]\d{16}[\dXx])(?![\dA-Za-z])/],
-  ['internal_path_review', /[A-Za-z]:[\\/](?:Users|learn_agent|codex)[\\/]/i],
-  ['merge_conflict', /^(?:<<<<<<< |=======$|>>>>>>> )/],
-];
-function scanText(name, body) {
-  const found = [];
-  body.split(/\r?\n/).forEach((line, index) => {
-    if (secrets.some(secret => line.includes(secret))) found.push({ path: name, line: index + 1, kind: 'current_local_secret' });
-    for (const [kind, pattern] of patterns) if (pattern.test(line)) {
-      const mockAssignment = 'MODEL_API_' + 'KEY: ' + JSON.stringify(['anonymous', 'test', 'key'].join('-'));
-      const reviewed = kind === 'literal_secret_review' && ['src/services/jsonRequestSafety.test.ts', 'src/services/modelProxy.test.ts'].includes(name) && line.includes(mockAssignment);
-      found.push({ path: name, line: index + 1, kind, ...(reviewed ? { resolution: 'Reviewed fixed fictional credential for local HTTP mock; not a provider key' } : {}) });
-    }
-  });
-  return found;
-}
+const scanText = (name, body) => scanPublicationText(name, body, secrets);
 // A disposable Git database gives native ignore semantics without initializing the project.
+const trackedForIgnoreResult = git(root, ['ls-files', '-z'], undefined, true);
+const trackedForIgnore = trackedForIgnoreResult.status === 0 ? trackedForIgnoreResult.stdout.split('\0').filter(Boolean) : [];
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-interview-sync-'));
 let ignored, probes;
 try {
@@ -112,7 +155,7 @@ try {
     for (let i = 0; i + 3 < parts.length; i += 4) if (!parts[i + 2].startsWith('!')) rules.set(parts[i + 3], { source: slash(path.relative(root, path.resolve(root, parts[i]))), line: Number(parts[i + 1]), pattern: parts[i + 2] });
     return rules;
   }
-  ignored = check([...source.files.keys(), ...source.links]);
+  ignored = check([...source.files.keys(), ...source.links, ...trackedForIgnore]);
   const privateProbes = ['.env', '.env.production', 'src/.env', '.local-usage/a.jsonl', '.local-publication-audit/a.json', 'docs/private.md', 'uploads/resume.pdf', 'src/uploads/resume.pdf', 'src/private/a.json', 'src/data/resumes/a.json', 'src/resume.pdf', 'src/leaked.pem', 'src/usage.jsonl', 'src/unknown.zip', 'src/credentials.json', 'e2e/.auth/user.json', 'scripts/private-data.json', 'test-fixtures/public-coach/resume.pdf', 'node_modules/a.js', 'playwright-report-new/index.html', 'test-results-new/a.json'];
   const publicProbes = ['.env.example', '.gitignore', 'README.md', 'package-lock.json', 'server.ts', 'src/App.tsx', 'e2e/coach-boundaries.spec.ts', 'scripts/github-sync-check.mjs', 'test-fixtures/public-coach/02-rag-evaluation.json'];
   const results = check([...privateProbes, ...publicProbes]);
@@ -151,7 +194,8 @@ const blockers = [];
 if (candidateFindings.length) blockers.push('Candidate content findings require review (see findings.json)');
 if (probes.some(item => !item.passed)) blockers.push('Ignore regression probe failed');
 if (trackedIgnored.length) blockers.push('Ignored files are already tracked; ignore rules do not untrack them');
-if (originalGit.history.length || originalGit.blobsSkipped) blockers.push('Git history needs review');
+if (unresolvedFindings(originalGit.history).length || originalGit.blobsSkipped) blockers.push('Git history needs review');
+if (originalGit.exists && (unresolvedFindings(originalGit.indexFindings).length || originalGit.indexUnscanned.length || originalGit.indexUnsupported.length)) blockers.push('Git index needs review');
 if (source.links.length || source.nestedGit.length) blockers.push('Symlinks or nested repositories need review');
 if (coverage.some(item => item.scope === 'original' && candidates.includes(item.path) && item.status !== 'text_scanned')) blockers.push('Candidate content not fully text-scanned');
 if (!source.files.has('LICENSE')) blockers.push('Original project has no LICENSE; reference LICENSE needs owner confirmation before copying');
@@ -163,10 +207,12 @@ for (const name of requiredFixtures) {
 const plan = JSON.parse(fs.readFileSync(path.join(root, 'release-files.json'), 'utf8'));
 const planned = new Set(plan.files.filter(name => source.files.has(name)));
 for (const name of source.files.keys()) if (plan.directories.some(dir => name.startsWith(dir + '/')) && !(plan.excludedDirectories ?? []).some(dir => name.startsWith(dir + '/'))) planned.add(name);
-const manifestDrift = { gitOnly: candidates.filter(name => !planned.has(name)), planOnly: [...planned].filter(name => !candidates.includes(name)) };
-if (manifestDrift.gitOnly.length || manifestDrift.planOnly.length) blockers.push('release-files.json disagrees with native Git ignore results');
+const missingPlanFiles = plan.files.filter(name => !source.files.has(name));
+if (missingPlanFiles.length) blockers.push('Required publication files are missing');
+const manifestDrift = publicationDrift(candidates, [...planned], originalGit.exists ? originalGit.tracked : null);
+if (Object.values(manifestDrift).some(paths => paths.length)) blockers.push('Working files, release-files.json and Git tracked scope disagree');
 const counts = values => Object.fromEntries([...new Set(values)].sort().map(value => [value, values.filter(item => item === value).length]));
-const summary = { checkedAt: new Date().toISOString(), originalFiles: source.files.size, publicFiles: reference?.files.size ?? null, candidates: candidates.length, ignored: source.files.size - candidates.length, comparison: counts(comparison.map(item => item.state)), candidateFindings: candidateFindings.length, reviewedCandidateFindings, allFindings: findings.length, coverage: counts(coverage.map(item => item.status)), probesPassed: probes.filter(item => item.passed).length, probesTotal: probes.length, originalGit, publicGit, trackedIgnored, manifestDrift, blockers, readyForHumanReview: blockers.length === 0, limitations: ['No automatic publish approval: review new/changed content before every commit', 'Pattern scans cannot certify privacy, ownership or all secret formats', 'Generated/dependency, binary and large file bodies are skipped; coverage.csv enumerates every skipped path', 'No remote history fetched; no project Git initialization/staging/commit/push', 'Audit output is local and ignored; filenames can themselves be private', 'Existing files only; deletions, Git attributes and staged-only content still require Desktop review'] };
+const summary = { checkedAt: new Date().toISOString(), originalFiles: source.files.size, publicFiles: reference?.files.size ?? null, candidates: candidates.length, ignored: source.files.size - candidates.length, comparison: counts(comparison.map(item => item.state)), candidateFindings: candidateFindings.length, reviewedCandidateFindings, allFindings: findings.length, coverage: counts(coverage.map(item => item.status)), probesPassed: probes.filter(item => item.passed).length, probesTotal: probes.length, originalGit, publicGit, trackedIgnored, missingPlanFiles, manifestDrift, blockers, readyForHumanReview: blockers.length === 0, limitations: ['No automatic publish approval: review new/changed content before every commit', 'Pattern scans cannot certify privacy, ownership or all secret formats', 'Generated/dependency, binary and large file bodies are skipped; coverage.csv enumerates every skipped path', 'No remote history fetched; no project Git initialization/staging/commit/push', 'Audit output is local and ignored; filenames can themselves be private', 'Working files and Git index/history are scanned separately; review deletions and Git attributes before committing'] };
 fs.mkdirSync(output, { recursive: true });
 function json(name, value) { fs.writeFileSync(path.join(output, name), JSON.stringify(value, null, 2) + '\n'); }
 function csv(name, rows) {
@@ -179,6 +225,10 @@ json('summary.json', summary); json('findings.json', findings); json('ignore-pro
 csv('comparison.csv', comparison); csv('scan-coverage.csv', coverage);
 csv('ignored-files.csv', [...ignored].map(([name, rule]) => ({ path: name, ...rule })));
 csv('upload-manifest.csv', candidates.map(name => ({ path: name, bytes: source.files.get(name).bytes, sha256: hash(fs.readFileSync(source.files.get(name).absolute)) })));
+fs.writeFileSync(path.join(output, 'tracked-files.txt'), originalGit.tracked.slice().sort().join('\n') + '\n');
 fs.writeFileSync(path.join(output, 'upload-files.txt'), candidates.join('\n') + '\n');
-console.log(JSON.stringify({ candidates: summary.candidates, ignored: summary.ignored, comparison: summary.comparison, candidateFindings: summary.candidateFindings, probes: `${summary.probesPassed}/${summary.probesTotal}`, blockers, output: '.local-publication-audit/' }, null, 2));
+console.log(JSON.stringify({ candidates: summary.candidates, ignored: summary.ignored, comparison: summary.comparison, candidateFindings: summary.candidateFindings, tracked: originalGit.tracked.length, indexFindings: originalGit.exists ? unresolvedFindings(originalGit.indexFindings).length : 0, unresolvedHistoryFindings: unresolvedFindings(originalGit.history).length, probes: `${summary.probesPassed}/${summary.probesTotal}`, blockers, output: '.local-publication-audit/' }, null, 2));
 process.exitCode = blockers.length ? 1 : 0;
+
+}
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) runAudit();
