@@ -123,7 +123,7 @@ function repository(directory) {
       if (Number(git(directory, ['cat-file', '-s', id]).stdout) > 2 * 1024 * 1024) { indexUnscanned.push(name); continue; }
       body = git(directory, ['cat-file', 'blob', id]).stdout;
     }
-    if (body.includes('\0')) { indexUnscanned.push(name); continue; }
+    if (body.includes('\0')) { if (allowedBinary(name)) { indexBlobsScanned++; continue; } indexUnscanned.push(name); continue; }
     indexBlobsScanned++;
     indexFindings.push(...scanText(name, body).map(item => ({ ...item, object: id })));
   }
@@ -140,6 +140,8 @@ for (const [name, file] of source.files) {
   }
 }
 const scanText = (name, body) => scanPublicationText(name, body, secrets);
+// README 公开截图是白名单内的唯一二进制候选：人工核验内容后放行，不参与文本扫描。
+const allowedBinary = name => /^docs\/screenshots\/[\w.-]+\.png$/.test(name);
 // A disposable Git database gives native ignore semantics without initializing the project.
 const trackedForIgnoreResult = git(root, ['ls-files', '-z'], undefined, true);
 const trackedForIgnore = trackedForIgnoreResult.status === 0 ? trackedForIgnoreResult.stdout.split('\0').filter(Boolean) : [];
@@ -173,7 +175,7 @@ function scanInventory(inv, label, allowed) {
     else if (file.bytes > 2 * 1024 * 1024) status = 'large_file_not_content_scanned';
     else {
       const bytes = fs.readFileSync(file.absolute);
-      if (bytes.includes(0)) status = 'binary_not_content_scanned';
+      if (bytes.includes(0)) status = allowedBinary(name) ? 'binary_allowed' : 'binary_not_content_scanned';
       else { status = 'text_scanned'; findings.push(...scanText(name, bytes.toString('utf8')).map(item => ({ ...item, scope: label, candidate: allowed.has(name) }))); }
     }
     coverage.push({ scope: label, path: name, status });
@@ -197,7 +199,7 @@ if (trackedIgnored.length) blockers.push('Ignored files are already tracked; ign
 if (unresolvedFindings(originalGit.history).length || originalGit.blobsSkipped) blockers.push('Git history needs review');
 if (originalGit.exists && (unresolvedFindings(originalGit.indexFindings).length || originalGit.indexUnscanned.length || originalGit.indexUnsupported.length)) blockers.push('Git index needs review');
 if (source.links.length || source.nestedGit.length) blockers.push('Symlinks or nested repositories need review');
-if (coverage.some(item => item.scope === 'original' && candidates.includes(item.path) && item.status !== 'text_scanned')) blockers.push('Candidate content not fully text-scanned');
+if (coverage.some(item => item.scope === 'original' && candidates.includes(item.path) && item.status !== 'text_scanned' && item.status !== 'binary_allowed')) blockers.push('Candidate content not fully text-scanned');
 if (!source.files.has('LICENSE')) blockers.push('Original project has no LICENSE; reference LICENSE needs owner confirmation before copying');
 const requiredFixtures = ['02-rag-evaluation', '03-experience', '04-discovery', '05-dont-know', '06-hypothetical', 'experience-internal-note', 'experience-semantic-expansion'];
 for (const name of requiredFixtures) {

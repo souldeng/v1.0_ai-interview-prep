@@ -2,6 +2,13 @@
 
 **基于真实简历、岗位要求与面经资料的 AI 面试准备与训练工具。**
 
+**AI Interview Prep** is a local-first interview training app: import your resume and target job description, collect real interview questions, let AI organize the materials and generate grounded practice questions, then train through an **answer → AI feedback → follow-up → retry** loop. All personal data stays in your browser; model calls go through a local proxy with token and cost tracking. [中文说明见下](#-核心功能)。
+
+<p align="center">
+  <img src="docs/screenshots/dashboard.png" alt="工作台首页" width="49%" />
+  <img src="docs/screenshots/workbench-analysis.png" alt="岗位分析工作台" width="49%" />
+</p>
+
 AI 面试通是一款本地运行的 AI 面试训练应用，面向希望系统学习面试知识、准备目标岗位及复练实际面试问题的求职者。
 
 用户可以导入简历、收集岗位 JD 和面经，由 AI 整理资料、生成针对性问题，并通过 **回答 → AI 点评 → 追问 → 重答 → 保存** 的流程持续练习。

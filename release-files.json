@@ -26,7 +26,8 @@
   "directories": [
     "src",
     "e2e",
-    "test-fixtures"
+    "test-fixtures",
+    "docs/screenshots"
   ],
   "excludedDirectories": [
     "test-fixtures/coach"

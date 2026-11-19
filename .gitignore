@@ -41,8 +41,10 @@
 !/test-fixtures/public-coach/*.json
 /test-fixtures/coach/
 
-# 内部文档、演示准备、设计稿、私人备份和本地配置不公开
-/docs/
+# 内部文档、演示准备、设计稿、私人备份和本地配置不公开；仅放行 README 截图目录
+!/docs/
+/docs/*
+!/docs/screenshots/
 /designs/
 .local-backups/
 .local-usage/
@@ -131,6 +133,8 @@ secrets.json
 *.jpg
 *.jpeg
 *.webp
+# README 公开截图例外（须位于 *.png 之后覆盖）
+!/docs/screenshots/*.png
 
 # 工具只放行已审查的文件，避免随手保存的数据进入 scripts
 /scripts/*
