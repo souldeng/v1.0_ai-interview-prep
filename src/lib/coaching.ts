@@ -5,6 +5,8 @@ const clauses = (value: string) => value.split(/[。；;\n，,]/).map(s => s.tri
 export const hasNegativeClaim = (value: string) => /从未|没有|未曾|尚未|尚无|未负责|不负责|未参与|未完成|不懂|不会|不能|不代表|计划|打算|准备学习/.test(value);
 
 export function isKnowledgeQuestion(question: Question) {
+  if (question.resumePracticeOrigin?.focus === "knowledge") return true;
+  if (question.projectDeepDive || question.experienceOrigin || question.resumePracticeOrigin) return false;
   if (/真实项目|你的项目|个人贡献|简历|经历|做过|负责的/.test(question.text)) return false;
   return question.technical || (question.sourceType === "foundation" && question.category !== "转岗动机 / 能力迁移" && question.category !== "项目表达 / 行为面试");
 }

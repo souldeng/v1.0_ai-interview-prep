@@ -36,9 +36,11 @@ test("创建页核对招聘平台文字后使用 JD，不要求资料名称和�
   await expect(page.getByText(raw, { exact: true })).toBeVisible();
   await page.getByPlaceholder("例如：AI 产品经理").fill("匿名JD体验验收");
   await page.getByRole("button", { name: "创建岗位准备方案", exact: true }).click();
-  await page.reload(); await page.getByRole("button", { name: "查看岗位", exact: true }).click();
+  await page.reload();
+  await page.getByRole("button", { name: "查看岗位准备", exact: true }).click();
+  await page.getByRole("button", { name: "查看岗位", exact: true }).click();
   await page.getByRole("button", { name: "岗位资料", exact: true }).click();
-  await page.getByText("原始岗位 JD", { exact: true }).click();
+  await page.getByText("查看原始岗位 JD", { exact: true }).click();
   await expect(page.getByText(clean, { exact: true })).toBeVisible();
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
 });
@@ -67,11 +69,11 @@ test("多图按核对顺序合并，OCR未结束不能提前确认使用，原�
   await page.getByRole("button", { name: "1. 招聘截图1.png", exact: true }).click();
   await expect(page.getByRole("textbox", { name: "当前文件核对文字" })).toHaveValue("识别时的手工补充");
   await page.getByRole("textbox", { name: "当前文件核对文字" }).fill("职责：访谈客户。");
-  await page.getByRole("button", { name: "确认当前文字", exact: true }).click();
   await page.getByRole("button", { name: "2. 招聘截图2.png", exact: true }).click();
   await expect(page.getByRole("img", { name: "招聘截图2.png 原图", exact: true })).toBeVisible();
   await page.getByRole("textbox", { name: "当前文件核对文字" }).fill("要求：理解 RAG；三年经验优先。");
-  await page.getByRole("button", { name: "确认当前文字", exact: true }).click();
+  await page.getByRole("button", { name: "集中确认所选文字", exact: true }).click();
+  await expect(page.getByRole("status").filter({ hasText: "已集中确认 2 份资料文字" })).toBeVisible();
   await page.getByRole("button", { name: "上移 招聘截图2.png", exact: true }).click();
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.screenshot({ path: info.outputPath("images-reviewed-ordered.png"), fullPage: true });

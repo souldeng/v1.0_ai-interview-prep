@@ -1,14 +1,14 @@
 import { useEffect, useRef, useState } from "react";
-import { ClipboardCheck, FileWarning, ShieldCheck } from "lucide-react";
+import { ArrowRight, CircleAlert, FileText, Lightbulb, Sparkles, Target } from "lucide-react";
 import type { InterviewProject, JobAnalysisBasis, SavedJobAnalysis, UserProfile } from "../../lib/domain";
-import { createPreparation } from "../../lib/interview";
 import { buildInterviewContext } from "../../lib/interviewContext";
 import { usableMaterial } from "../../lib/jobMaterialFlow";
 import { analyzeJobWithModel } from "../../services/modelClient";
-
 import { analysisFreshness, analysisSources, buildAnalysisBasis, createSavedAnalysis } from "../../lib/jobAnalysis";
 import { jobAnalysisPrompt } from "../../lib/modelPrompts";
 import type { AnalysisQuestionSelection } from "../../lib/analysisPractice";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 
 export function confirmedExperienceText(profile: UserProfile) {
   return buildInterviewContext({ profile }).confirmedUserFacts.join("\n");
@@ -22,68 +22,105 @@ export function thirdPartyInterviewNotes(project: InterviewProject) {
   return (project.materials || []).filter(material => material.kind === "interview_experience" && usableMaterial(material));
 }
 
-export function EvidenceAnalysis({ project, profile, modelAvailable, onSaveAnalysis, onFailure, onPractice, practiceDisabled, initialSelectedId }: { project: InterviewProject; profile: UserProfile; modelAvailable?: boolean; onSaveAnalysis: (projectId: string, result: SavedJobAnalysis) => string | null; onFailure?: (message: string) => void; onPractice?: (selection: AnalysisQuestionSelection) => void; practiceDisabled?: boolean; initialSelectedId?: string | null }) {
+type Props = {
+  project: InterviewProject;
+  profile: UserProfile;
+  modelAvailable?: boolean;
+  onSaveAnalysis: (projectId: string, result: SavedJobAnalysis) => string | null;
+  onFailure?: (message: string) => void;
+  onPractice?: (selection: AnalysisQuestionSelection) => void;
+  practiceDisabled?: boolean;
+  initialSelectedId?: string | null;
+  onAddToLibrary?: (analysisId: string, rowIndex: number, question: string) => string | null;
+  addedRecommendedRows?: Set<string>;
+  onRequestMaterials?: () => void;
+};
+
+const evidenceTone = {
+  direct: { label: "直接匹配", tone: "bg-emerald-50 text-emerald-700" },
+  transferable: { label: "可迁移", tone: "bg-indigo-50 text-indigo-700" },
+  no_evidence: { label: "待补强", tone: "bg-accent text-primary" },
+  unknown: { label: "待核对", tone: "bg-muted text-muted-foreground" },
+} as const;
+
+function SourcesPanel({ sources, selected, records, selectedId, onSelect }: { sources: ReturnType<typeof analysisSources>; selected: SavedJobAnalysis; records: SavedJobAnalysis[]; selectedId: string; onSelect: (value: string) => void }) {
+  return <section className="border-t border-border pt-4">
+    <div className="flex flex-wrap items-center justify-between gap-3"><div className="flex items-center gap-2 text-sm text-muted-foreground"><Lightbulb size={16} className="text-primary"/><span>优先练习最贴近岗位要求的问题，再补强薄弱项。</span></div><details className="text-sm text-muted-foreground"><summary className="cursor-pointer underline decoration-[#D8C4B0] underline-offset-4 hover:text-foreground">查看分析依据与来源</summary><div className="mt-4 grid gap-5 rounded-xl bg-card p-4 sm:grid-cols-2"><div><p className="text-xs font-medium text-muted-foreground">当前资料</p><ul className="mt-2 space-y-1.5">{sources.map((source, index) => <li key={index}>{source.label}</li>)}</ul></div>{selected.basis && <div><p className="text-xs font-medium text-muted-foreground">生成时使用</p><ul className="mt-2 space-y-1.5">{selected.basis.sources.map((source, index) => <li key={index}>{source.label}</li>)}</ul></div>}</div></details></div>
+    {records.length > 1 && <details className="mt-4 text-sm text-muted-foreground"><summary className="cursor-pointer underline decoration-[#D8C4B0] underline-offset-4 hover:text-foreground">查看历史分析（{records.length}）</summary><select aria-label="选择已保存分析" value={selectedId} onChange={event => onSelect(event.target.value)} className="form-control mt-3 max-w-sm">{records.map((item, index) => <option key={item.id} value={item.id}>第 {index + 1} 次 · {new Date(item.generatedAt).toLocaleString("zh-CN")}</option>)}</select></details>}
+  </section>;
+}
+
+export function EvidenceAnalysis({ project, profile, modelAvailable, onSaveAnalysis, onFailure, onPractice, practiceDisabled, initialSelectedId, onAddToLibrary, addedRecommendedRows, onRequestMaterials }: Props) {
   const context = buildInterviewContext({ project, profile });
-  const evidence = context.confirmedUserFacts.join("\n");
   const requirements = context.targetJob.jd;
-  const notes = thirdPartyInterviewNotes(project);
-  const preparation = evidence && requirements ? createPreparation(evidence, requirements) : null;
   const records = project.aiAnalyses ?? [];
   const [selectedId, setSelectedId] = useState<string | null>(initialSelectedId ?? null);
   const selected = records.find(item => item.id === selectedId) ?? records.at(-1);
   const [basisState, setBasisState] = useState<{ key: string; basis: JobAnalysisBasis } | null>(null);
   const [basisError, setBasisError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [notice, setNotice] = useState("");
+  const alive = useRef(true);
+  const requesting = useRef(false);
   const sources = analysisSources(project, profile, context);
   const contextKey = JSON.stringify([jobAnalysisPrompt(context), sources]);
   const currentBasis = basisState?.key === contextKey ? basisState.basis : null;
-  const alive = useRef(true);
-  const requesting = useRef(false);
+  const freshness = selected ? analysisFreshness(selected, currentBasis, { project, profile }) : "unknown";
+  const hasRequirements = Boolean(requirements.trim());
+  const confirmedCount = profile.experiences.filter(card => card.confirmed).length;
+
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   useEffect(() => {
-    let cancelled = false; setBasisError("");
-    void buildAnalysisBasis(project, profile, context).then(basis => { if (!cancelled) setBasisState({ key: contextKey, basis }); })
-      .catch(error => { if (!cancelled) { setBasisState(null); setBasisError(error instanceof Error ? error.message : "分析依据暂时无法核对。"); } });
+    let cancelled = false;
+    setBasisError("");
+    void buildAnalysisBasis(project, profile, context).then(basis => {
+      if (!cancelled) setBasisState({ key: contextKey, basis });
+    }).catch(error => {
+      if (!cancelled) { setBasisState(null); setBasisError(error instanceof Error ? error.message : "分析依据暂时无法核对。"); }
+    });
     return () => { cancelled = true; };
   }, [contextKey]);
-  const freshness = selected ? analysisFreshness(selected, currentBasis, { project, profile }) : "unknown";
-  const inputsChanged = selected?.basis && currentBasis && selected.basis.projectId === project.id && selected.basis.fingerprint !== currentBasis.fingerprint;
-  const [loading, setLoading] = useState(false);
-  const [notice, setNotice] = useState("");
+
   const analyze = async () => {
     if (requesting.current) return;
     if (!modelAvailable) return setNotice("尚未配置模型服务；已保存分析与本地线索仍可查看。");
     if (!requirements.trim()) return setNotice("请先提供岗位 JD；旧分析仍保留。");
-    requesting.current = true; setLoading(true); setNotice("");
+    requesting.current = true;
+    setLoading(true);
+    setNotice("");
     try {
       const basis = await buildAnalysisBasis(project, profile, context);
       const rows = await analyzeJobWithModel(context);
       const result = createSavedAnalysis(rows, basis);
       const error = onSaveAnalysis(project.id, result);
-      if (error) throw new Error(`分析保存失败：${error}。此前分析仍保留，请重试。`);
-      if (alive.current) { setSelectedId(result.id); setNotice("AI 分析已保存；依据为本次请求时的资料，结论仍需人工核对。"); }
+      if (error) throw new Error("分析保存失败：" + error + "。此前分析仍保留，请重试。");
+      if (alive.current) { setSelectedId(result.id); setNotice("AI 分析已保存；建议结合真实项目经历进一步核对。"); }
     } catch (error) {
       const message = error instanceof Error ? error.message : "模型分析失败，此前结果仍保留。";
       if (alive.current) setNotice(message);
-      else onFailure?.(`岗位“${project.jobTitle}”分析未完成：${message}。此前已保存分析与资料仍保留。`);
+      else onFailure?.("岗位“" + project.jobTitle + "”分析未完成：" + message + "。此前已保存分析与资料仍保留。");
+    } finally {
+      requesting.current = false;
+      if (alive.current) setLoading(false);
     }
-    finally { requesting.current = false; if (alive.current) setLoading(false); }
   };
-  return <div className="space-y-6"><section className="rounded-2xl border border-emerald-100 bg-emerald-50/50 p-6"><div className="flex items-start gap-3"><span className="rounded-xl bg-white p-2.5 text-emerald-700"><ShieldCheck size={20}/></span><div><h2 className="text-lg font-semibold text-slate-950">基于已确认经历的分析</h2><p className="mt-1 text-sm leading-6 text-slate-600">根据岗位要求与已确认经历，选择最值得准备的问题。</p></div></div>{selected && <section aria-label="已保存的 AI 分析" className="mt-5 space-y-3 rounded-xl border border-slate-200 bg-white p-4">
-    <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-semibold text-slate-950">已保存的 AI 分析</h3><p className="text-xs text-slate-600">生成时间：{new Date(selected.generatedAt).toLocaleString("zh-CN")}</p></div>
-    <p role="status" className="rounded-lg bg-slate-50 p-3 text-sm text-slate-700">{selected.basis && !currentBasis && !basisError ? "正在核对分析依据…" : freshness === "current" ? "分析依据与当前资料一致" : freshness === "stale" ? "岗位资料已有变化，建议重新分析" : "分析依据未知，无法判断是否对应当前资料"}</p>
-    {freshness === "unknown" && inputsChanged && <p role="alert" className="text-sm text-amber-900">岗位资料已有变化，建议重新分析</p>}
-    {basisError && <p className="text-sm text-amber-900">{basisError}</p>}
-    <p className="text-xs text-slate-600">已保存不代表事实已核验；推荐题是 AI 准备建议，不是企业真实面试原题，选择后才会进入训练。</p>
-    {selected.rows.map((row, index) => <article key={index} className="rounded-lg border border-slate-200 p-3 text-sm">
-      <h4 className="font-medium text-slate-950">{row.requirement}</h4><details className="mt-2"><summary className="cursor-pointer text-xs text-slate-600">分析理由与依据</summary><p className="mt-1 text-slate-700">{({ direct: "直接证据", transferable: "可迁移经验", no_evidence: "暂无证据", unknown: "无法判断" } as const)[row.status]}{row.evidenceQuote && ` · 生成时已确认经历原句：“${row.evidenceQuote}”`}</p><p className="mt-1 text-slate-600">{row.reason}</p>{row.studyTopic && <p className="mt-1 text-slate-600">补充学习：{row.studyTopic}</p>}</details>{row.practiceQuestion && <p className="mt-1 text-slate-600">建议准备：{row.practiceQuestion}</p>}
-      {row.practiceQuestion.trim() && onPractice && <button onClick={() => onPractice({ projectId: project.id, analysisId: selected.id, rowIndex: index })} disabled={practiceDisabled || loading} className="mt-3 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 disabled:opacity-50">练习这道题</button>}
-    </article>)}
-    <details className="rounded-lg border border-slate-200 p-3 text-sm text-slate-700"><summary className="cursor-pointer font-medium">查看分析依据</summary>
-      <p className="mt-3 font-medium">生成时使用的资料</p>{selected.basis ? <ul className="mt-2 list-disc pl-5">{selected.basis.sources.map((source, i) => <li key={i}>{({ jd: "JD", experience: "已确认经历", reference: "企业/岗位参考", third_party: "第三方面经（非本人事实）", previous_answer: "既有最终确认答案" } as const)[source.kind]}：{source.label}</li>)}</ul> : <p>未记录依据；不能推断旧分析仍然有效。</p>}
-      <p className="mt-3 font-medium">当前用于分析的资料</p><ul className="mt-2 list-disc pl-5">{sources.map((source, i) => <li key={i}>{source.label}（{({ jd: "JD", experience: "已确认经历", reference: "企业/岗位参考", third_party: "第三方面经", previous_answer: "既有最终确认答案" } as const)[source.kind]}）</li>)}</ul>
-      {selected.basis && <details className="mt-3"><summary className="cursor-pointer text-xs">内容标识详情</summary><p className="mt-2 break-all text-xs">生成时内容特征：{selected.basis.fingerprint}</p><p className="mt-2 text-xs">记录的是模型实际输入与任务模板的内容特征，不保存完整历史原文；未确认经历不会进入本人事实。</p></details>}
-    </details>
-    {records.length > 1 && <details className="rounded-lg border border-slate-200 p-3 text-sm text-slate-700"><summary className="cursor-pointer">查看其他已保存分析（{records.length} 次）</summary><select aria-label="选择已保存分析" value={selected.id} onChange={event => setSelectedId(event.target.value)} className="form-control mt-3">{records.map((item, index) => <option key={item.id} value={item.id}>第 {index + 1} 次 · {new Date(item.generatedAt).toLocaleString("zh-CN")}</option>)}</select></details>}
-    {selected.id !== records.at(-1)?.id && <button onClick={() => setSelectedId(records.at(-1)!.id)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm">查看最近一次分析</button>}
-  </section>}{preparation && <details className="mt-4 rounded-lg border border-slate-200 p-3"><summary className="cursor-pointer text-sm font-medium text-slate-700">本地材料线索（辅助）</summary>{!evidence ? <p className="mt-4 rounded-xl border border-emerald-100 bg-white p-4 text-sm leading-6 text-slate-600">确认简历经历后，可获得更有针对性的分析。</p> : !requirements ? <p className="mt-4 rounded-xl border border-amber-100 bg-amber-50 p-4 text-sm text-amber-900">未发现可分析的 JD 文本。</p> : <div className="mt-5 overflow-x-auto rounded-xl border border-emerald-100 bg-white"><table className="w-full min-w-[720px] text-left text-sm"><thead className="bg-emerald-50 text-slate-600"><tr><th>能力主题</th><th>岗位文字线索</th><th>已确认经历文字线索</th><th>边界</th></tr></thead><tbody>{preparation?.matrix.map(row => <tr key={row.capability} className="border-t border-slate-100 align-top text-slate-700"><td className="font-medium text-slate-950">{row.capability}</td><td>{row.requirement}</td><td>{row.evidence || "未发现已确认文字线索"}</td><td>{row.gap}</td></tr>)}</tbody></table></div>}</details>}<button onClick={() => void analyze()} disabled={loading} className="mt-4 rounded-lg border border-emerald-200 bg-white px-4 py-2 text-sm font-medium text-emerald-800 disabled:opacity-50">{loading ? "正在分析…" : selected ? "重新分析" : "AI 分析岗位"}</button>{notice && <p role="status" className="mt-2 text-sm text-slate-700">{notice}</p>}</section><details className="rounded-xl border border-slate-200 bg-white p-4"><summary className="cursor-pointer text-sm font-medium text-slate-700">岗位来源范围</summary><div className="hidden"><div><p className="mt-1 text-sm leading-6 text-slate-600">岗位原始 JD 与已核对补充材料分别保留。</p></div></div><ul className="mt-4 list-disc space-y-2 pl-5 text-sm leading-6 text-slate-600"><li>原项目 JD：{project.jobDescription ? "已保存" : "未保存"}</li><li>已核对额外 JD：{(project.materials || []).filter(material => material.kind === "job_description" && usableMaterial(material)).length} 条</li><li>已确认经历卡：{profile.experiences.filter(card => card.confirmed).length} 张</li></ul></details>{notes.length > 0 && <section className="rounded-2xl border border-amber-100 bg-amber-50/60 p-6"><div className="flex items-start gap-3"><span className="rounded-xl bg-white p-2.5 text-amber-700"><FileWarning size={20}/></span><div><h2 className="text-lg font-semibold text-slate-950">第三方面经：仅作准备参考</h2><p className="mt-1 text-sm leading-6 text-slate-600">面经不会进入个人事实或匹配证据。</p></div></div>{notes.length === 0 ? <p className="mt-4 text-sm text-slate-600">暂无已核对面经文字记录。</p> : <ul className="mt-4 space-y-2 text-sm text-slate-700">{notes.map(note => <li key={note.id} className="rounded-lg border border-amber-100 bg-white p-3"><span className="font-medium">{note.title}</span><p className="mt-1 line-clamp-2 whitespace-pre-wrap leading-6">{note.content}</p></li>)}</ul>}</section>}</div>;
+
+  if (!hasRequirements) return <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_280px]">
+    <section className="rounded-2xl border border-border bg-gradient-to-br from-background to-white p-6 md:p-8"><div className="flex size-11 items-center justify-center rounded-xl bg-accent text-primary"><CircleAlert size={21}/></div><p className="mt-5 text-sm font-medium text-primary">岗位资料不完整</p><h2 className="mt-2 text-2xl font-semibold tracking-[-0.03em] text-foreground">补充岗位 JD，再开始分析</h2><p className="mt-3 max-w-xl text-[16px] leading-7 text-muted-foreground">当前岗位没有可用于分析的职责或任职要求。补充原始 JD 后，分析才会基于真实岗位要求生成。</p><div className="mt-6 flex flex-wrap gap-3"><Button onClick={onRequestMaterials} className="h-10 bg-primary px-4 text-white hover:bg-primary/90 active:scale-[0.98]"><FileText size={16}/>补充岗位 JD<ArrowRight size={16}/></Button><Button variant="outline" onClick={onRequestMaterials} className="h-10 border-border bg-white text-muted-foreground hover:bg-amber-50">查看岗位资料</Button></div>{notice && <p role="status" className="mt-5 text-sm text-primary">{notice}</p>}</section>
+    <aside className="rounded-2xl border border-border bg-white p-5"><p className="text-sm font-medium text-foreground">分析需要什么</p><ul className="mt-4 space-y-3 text-sm leading-6 text-muted-foreground"><li>岗位职责与任职要求</li><li>已确认经历作为匹配依据</li></ul><p className="mt-5 border-t border-border pt-4 text-xs leading-5 text-muted-foreground">不会把待确认经历作为个人事实。</p></aside>
+  </div>;
+
+  if (!selected) return <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_280px]">
+    <section className="rounded-2xl border border-border bg-gradient-to-br from-background via-white to-white p-6 md:p-8"><div className="flex flex-wrap items-start justify-between gap-5"><div><div className="flex size-11 items-center justify-center rounded-xl bg-accent text-primary"><Sparkles size={20}/></div><p className="mt-5 text-sm font-medium text-primary">AI 岗位分析</p><h2 className="mt-2 text-2xl font-semibold tracking-[-0.03em] text-foreground">把岗位要求变成准备重点</h2><p className="mt-3 max-w-xl text-[16px] leading-7 text-muted-foreground">分析会对照岗位 JD 与已确认经历，定位可直接讲述的能力、需要迁移的经验与待补强方向。</p></div><Button onClick={() => void analyze()} disabled={loading} className="h-10 bg-primary px-4 text-white hover:bg-primary/90 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50">{loading ? "正在分析…" : "开始岗位分析"}<ArrowRight size={16}/></Button></div><div className="mt-7 grid gap-3 border-t border-border pt-5 sm:grid-cols-3"><div><p className="text-xs text-muted-foreground">岗位 JD</p><p className="mt-1 text-sm font-medium text-foreground">已就绪</p></div><div><p className="text-xs text-muted-foreground">确认经历</p><p className="mt-1 text-sm font-medium text-foreground">{confirmedCount} 条</p></div><div><p className="text-xs text-muted-foreground">分析输出</p><p className="mt-1 text-sm font-medium text-foreground">重点与练习题</p></div></div>{notice && <p role="status" className="mt-5 text-sm text-primary">{notice}</p>}</section>
+    <aside className="rounded-2xl border border-border bg-white p-5"><Target size={19} className="text-primary"/><p className="mt-4 text-sm font-medium text-foreground">分析后你可以</p><ul className="mt-3 space-y-3 text-sm leading-6 text-muted-foreground"><li>扫描能力重点与差距</li><li>从推荐问题直接进入练习</li><li>把有价值的问题加入岗位题库</li></ul></aside>
+  </div>;
+
+  const freshCopy = freshness === "current" ? { badge: "资料一致", tone: "bg-emerald-50 text-emerald-700", text: "分析依据与当前资料一致" } : freshness === "stale" ? { badge: "建议更新", tone: "bg-accent text-primary", text: "岗位或经历资料已有变化" } : { badge: "待核对", tone: "bg-muted text-muted-foreground", text: "正在核对分析依据" };
+  return <div className="space-y-5">
+    <section className="min-w-0"><div className="border-b border-border pb-5"><div className="flex flex-wrap items-start justify-between gap-4"><div><p className="text-sm font-medium text-primary">AI 岗位分析</p><h2 className="mt-1 text-[26px] font-semibold tracking-[-0.035em] text-foreground">优先准备这些能力与问题</h2><p className="mt-2 text-[15px] leading-6 text-muted-foreground">共 {selected.rows.length} 项结论，按岗位要求与已确认经历整理。</p></div><Button variant="outline" size="sm" onClick={() => void analyze()} disabled={loading} className="border-border bg-white text-muted-foreground hover:bg-amber-50">{loading ? "正在更新…" : "重新分析"}</Button></div><div className="mt-4 flex flex-wrap items-center gap-2 text-sm text-muted-foreground"><Badge className={"border-0 px-2.5 py-1 text-xs font-medium " + freshCopy.tone}>{freshCopy.badge}</Badge><span>{basisError || freshCopy.text}</span></div></div>
+      <div className="mt-5 space-y-3">{selected.rows.map((row, index) => { const state = evidenceTone[row.status]; const added = addedRecommendedRows?.has(selected.id + ":" + index) ?? false; return <article key={index} className="rounded-xl border border-border bg-white p-4 transition-colors hover:border-[#94A3B8] md:p-5"><div className="flex gap-4"><span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-background text-sm font-semibold text-primary">{String(index + 1).padStart(2, "0")}</span><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><Badge className={"border-0 px-2 py-0.5 text-xs font-medium " + state.tone}>{state.label}</Badge><h3 className="text-[17px] font-semibold leading-6 text-foreground">{row.requirement}</h3></div>{row.practiceQuestion && <div className="mt-3 rounded-lg bg-amber-50 px-3.5 py-3"><p className="text-xs font-medium text-primary">建议优先准备</p><p className="mt-1 text-[15px] font-medium leading-6 text-foreground">{row.practiceQuestion}</p></div>}<div className="mt-3 flex flex-wrap items-center justify-between gap-3"><details className="text-sm text-muted-foreground"><summary className="cursor-pointer list-none underline decoration-[#D8C4B0] underline-offset-4 hover:text-foreground">查看分析依据</summary><div className="mt-3 rounded-lg border border-border bg-card p-3 text-sm leading-6"><p><span className="font-medium text-muted-foreground">{state.label}</span>{row.evidenceQuote && " · 已确认经历：“" + row.evidenceQuote + "”"}</p><p className="mt-2">{row.reason}</p>{row.studyTopic && <p className="mt-2 text-muted-foreground">建议补充：{row.studyTopic}</p>}</div></details>{row.practiceQuestion.trim() && <div className="flex flex-wrap gap-2">{onPractice && <Button size="sm" onClick={() => onPractice({ projectId: project.id, analysisId: selected.id, rowIndex: index })} disabled={practiceDisabled || loading} className="bg-primary text-white hover:bg-primary/90 active:scale-[0.98]">练习这道题<ArrowRight size={14}/></Button>}{onAddToLibrary && (added ? <span className="inline-flex h-7 items-center rounded-md bg-emerald-50 px-2.5 text-xs font-medium text-emerald-700">已在岗位题库</span> : <Button size="sm" variant="outline" onClick={() => { const message = onAddToLibrary(selected.id, index, row.practiceQuestion); setNotice(message ?? "已加入岗位专项题库；可从题库继续练习。"); }} disabled={loading} className="border-border bg-white text-muted-foreground hover:bg-amber-50">加入题库</Button>)}</div>}</div></div></div></article>; })}</div>
+      {notice && <p role="status" className="mt-4 rounded-lg bg-amber-50 px-4 py-3 text-sm text-primary">{notice}</p>}
+    </section>
+    <SourcesPanel sources={sources} selected={selected} records={records} selectedId={selected.id} onSelect={setSelectedId}/>
+  </div>;
 }

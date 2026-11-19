@@ -147,5 +147,6 @@ secrets.json
 !/test-fixtures/public-coach/06-hypothetical.json
 !/test-fixtures/public-coach/experience-internal-note.json
 !/test-fixtures/public-coach/experience-semantic-expansion.json
+!/test-fixtures/public-coach/project-depth.json
 
 !/GITHUB_SYNC.md

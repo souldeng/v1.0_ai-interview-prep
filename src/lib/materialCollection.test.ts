@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createCollectedMaterial, collectionVersion, validateMaterialExtractions, createCollectionAnalysis, collectionPracticeContext, currentCollectionAnalysis, activeCollectionMaterials, nextCollectionBatch, removeFromCollectionBatch, saveCollectionAttempt } from "./materialCollection";
+import { createCollectedMaterial, collectionVersion, validateMaterialExtractions, createCollectionAnalysis, collectionPracticeContext, currentCollectionAnalysis, activeCollectionMaterials, nextCollectionBatch, removeFromCollectionBatch, saveCollectionAttempt, groupContinuousScreenshots } from "./materialCollection";
 import { emptyQuestionLibrary, loadQuestionLibrary, saveQuestionLibrary } from "./questionLibrary";
 import { emptyUserProfile } from "./profileStorage";
 import { exportBackup, importBackup } from "./backup";
@@ -81,6 +81,16 @@ test("连续截图换序使旧分析陈旧，普通更新时间不误报；存�
   saveQuestionLibrary({...emptyQuestionLibrary(),collection:value},storage);const before=loadQuestionLibrary(storage);fail=true;
   assert.throws(()=>saveQuestionLibrary({...before,collection:{...value,materials:[{...m,content:"修改文本"}]}},storage),/配额/);
   assert.deepEqual(loadQuestionLibrary(storage),before);
+});
+test("只有相邻截图存在明确重叠文字时才自动标为同一连续资料",()=>{
+  const first={...createCollectedMaterial("JD-1.png","岗位职责：负责需求澄清与方案设计。任职要求：理解检索增强生成的设计与验证。"),source:"screenshot" as const};
+  const continuation={...createCollectedMaterial("JD-2.png","任职要求：理解检索增强生成的设计与验证。还需说明评估思路。"),source:"screenshot" as const};
+  const unrelated={...createCollectedMaterial("面经.png","面试官问：如何评估 RAG？"),source:"screenshot" as const};
+  const grouped=groupContinuousScreenshots({materials:[first,continuation,unrelated],analyses:[],activeMaterialIds:[first.id,continuation.id,unrelated.id]});
+  assert.ok(grouped.materials[0].groupId);
+  assert.equal(grouped.materials[0].groupId,grouped.materials[1].groupId);
+  assert.deepEqual(grouped.materials.slice(0,2).map(item=>item.groupOrder),[0,1]);
+  assert.equal(grouped.materials[2].groupId,undefined);
 });
 test("同一题同时有原文和衍生来源时保留原文标签，所有依据仍保存在提取结果",()=>{
   const materials=[createCollectedMaterial("JD","理解RAG"),createCollectedMaterial("面经","如何评估RAG？")];

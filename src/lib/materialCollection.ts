@@ -33,6 +33,36 @@ export function currentCollectionAnalysis(collection: MaterialCollection, materi
 export function removeFromCollectionBatch(c: MaterialCollection, id: string): MaterialCollection {
   return { ...c, activeMaterialIds: activeCollectionMaterials(c).filter(m => m.id !== id).map(m => m.id) };
 }
+
+const normalizedScreenshotText = (value: string) => value.toLocaleLowerCase().replace(/[\s\p{P}\p{S}]/gu, "");
+const screenshotOverlapLength = 12;
+function likelyContinuousScreenshot(left: CollectedMaterial, right: CollectedMaterial) {
+  if (left.source !== "screenshot" || right.source !== "screenshot" || left.processing !== "recognized" || right.processing !== "recognized" || left.groupId || right.groupId) return false;
+  const earlier = normalizedScreenshotText(left.content), later = normalizedScreenshotText(right.content);
+  if (!earlier || !later) return false;
+  if (earlier === later && earlier.length >= screenshotOverlapLength) return true;
+  const maximum = Math.min(160, earlier.length, later.length);
+  for (let length = maximum; length >= screenshotOverlapLength; length--) if (earlier.endsWith(later.slice(0, length))) return true;
+  const earlierParagraphs = new Set(left.content.split(/[\n。；;！？!?]/).map(normalizedScreenshotText).filter(value => value.length >= screenshotOverlapLength));
+  return right.content.split(/[\n。；;！？!?]/).map(normalizedScreenshotText).some(value => value.length >= screenshotOverlapLength && earlierParagraphs.has(value));
+}
+
+/** Conservatively groups only adjacent OCR screenshots with a clear duplicated boundary. Different screenshots stay separate until the user groups them. */
+export function groupContinuousScreenshots(collection: MaterialCollection): MaterialCollection {
+  const active = activeCollectionMaterials(collection);
+  const groups = new Map<string, { groupId: string; groupOrder: number }>();
+  for (let index = 0; index < active.length - 1;) {
+    const first = active[index], second = active[index + 1];
+    if (!likelyContinuousScreenshot(first, second)) { index++; continue; }
+    const groupId = `source-${crypto.randomUUID()}`;
+    let end = index + 1;
+    while (end + 1 < active.length && likelyContinuousScreenshot(active[end], active[end + 1])) end++;
+    for (let member = index; member <= end; member++) groups.set(active[member].id, { groupId, groupOrder: member - index });
+    index = end + 1;
+  }
+  if (!groups.size) return collection;
+  return { ...collection, materials: collection.materials.map(material => groups.has(material.id) ? { ...material, ...groups.get(material.id)! } : material) };
+}
 export function nextCollectionBatch(c: MaterialCollection, result: CollectionAnalysis): MaterialCollection {
   if (!c.analyses.some(a => a.id === result.id)) throw new Error("请先保存整理结果，再开始下一批。");
   return { ...c, activeMaterialIds: [] };

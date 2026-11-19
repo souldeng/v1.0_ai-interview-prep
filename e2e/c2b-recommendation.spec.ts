@@ -145,7 +145,7 @@ test("C2-B 确认新轮次归档原答重答点评最终版及草稿，旧会话
   await seed(page, [item]);
   const before = await snapshot(page);
   await row(page).getByRole("button", { name: "练习这道题", exact: true }).click();
-  await page.getByRole("dialog", { name: "开始新一轮训练" }).getByRole("button", { name: "保存旧轮次并开始", exact: true }).click();
+  await page.getByRole("dialog", { name: "开始新一轮训练" }).getByRole("button", { name: "暂存并开始新练习", exact: true }).click();
   await expect(page.getByRole("heading", { name: chosen, exact: true })).toBeVisible();
   const saved = await page.evaluate(key => JSON.parse(localStorage.getItem(key)!)[0], projectKey);
   expect(saved.session.id).not.toBe(item.session!.id);
@@ -153,7 +153,7 @@ test("C2-B 确认新轮次归档原答重答点评最终版及草稿，旧会话
   expect(await page.evaluate(key => JSON.parse(localStorage.getItem(key)!), historyKey)).toEqual([item.session]);
   expect((await snapshot(page))[2]).toBe(before[2]);
   await primary(page); await page.getByRole("button", { name: "整理训练记录", exact: true }).click();
-  await page.getByRole("button", { name: "查看", exact: true }).click();
+  await page.getByRole("button", { name: "查看复盘", exact: true }).click();
   await expect(page.getByRole("textbox", { name: "本轮回答", exact: true })).toHaveValue("旧首答草稿：需要继续完善。");
   await expect(page.getByRole("textbox", { name: "同题重答", exact: true })).toHaveValue("旧重答草稿：补充职责边界。");
   await openDetails(page, "保存我的回答思路");
@@ -181,7 +181,7 @@ for (const kind of ["new-project", "archive", "existing-project"] as const) test
     Storage.prototype.setItem = function(key, value) { if (key === failKey) throw new DOMException("匿名启动写入失败", "QuotaExceededError"); original.call(this, key, value); };
   }, { failKey: kind === "archive" ? historyKey : projectKey });
   await row(page).getByRole("button", { name: "练习这道题", exact: true }).click();
-  if (kind !== "new-project") await page.getByRole("dialog", { name: "开始新一轮训练" }).getByRole("button", { name: "保存旧轮次并开始", exact: true }).click();
+  if (kind !== "new-project") await page.getByRole("dialog", { name: "开始新一轮训练" }).getByRole("button", { name: "暂存并开始新练习", exact: true }).click();
   await expect(page.getByRole("alert").filter({ hasText: "匿名启动写入失败" })).toBeVisible();
   await expect(page.getByRole("heading", { name: chosen, exact: true })).toHaveCount(0);
   const after = await snapshot(page);

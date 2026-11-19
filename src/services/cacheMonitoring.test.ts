@@ -37,7 +37,7 @@ test("同任务重复构造完全一致，其他用户和岗位不会复用前�
     const result = builder(other);
     assert.doesNotMatch(result.user, /用户甲|岗位甲|job-a/);
     assert.match(result.user, /用户乙|岗位乙/);
-    assert.ok(result.user.indexOf("内置学习知识点_不能当作本人经历") < result.user.indexOf('"当前问题"'));
+    assert.ok(result.user.indexOf("内置学习知识点_不能当作本人经历") > result.user.indexOf('"当前问题"'), "本题知识点属于动态块，不再打断前面的个人与岗位事实前缀");
   }
 });
 
@@ -72,4 +72,50 @@ test("流式首Token不把心跳/空角色/usage当内容；缓存缺失和异�
   assert.equal(collector.firstTokenLatencyMs(), 50);
   assert.equal(collector.usage()?.cacheHitTokens, null);
   assert.equal(extractTokenUsage({ prompt_tokens: null, completion_tokens: null }).inputTokens, null);
+});
+
+test("训练序列化对同一资料集合换序稳定，内容和事实边界变化仍改变Prompt", () => {
+  const original = { ...context,
+    confirmedUserFacts: ["用户乙未负责上线", "用户甲负责访谈"],
+    confirmedExperienceSources: ["b", "a"].map(id => ({ id, title: id, fields: { situation: "", action: id, tools: "", result: "", reflection: "未负责上线" } })),
+    confirmedJobMaterials: [{ id: "b", title: "岗位参考乙", text: "要求乙" }, { id: "a", title: "岗位参考甲", text: "要求甲" }],
+    thirdPartyInterviewMaterials: [{ id: "b", title: "第三方乙", text: "他人20个项目" }, { id: "a", title: "第三方甲", text: "他人案例" }],
+    confirmedPreviousAnswers: ["较早回答", "较新回答"],
+  };
+  const swapped = { ...original, confirmedUserFacts: [...original.confirmedUserFacts].reverse(), confirmedExperienceSources: [...original.confirmedExperienceSources].reverse(), confirmedJobMaterials: [...original.confirmedJobMaterials].reverse(), thirdPartyInterviewMaterials: [...original.thirdPartyInterviewMaterials].reverse() };
+  const before = JSON.stringify(original);
+  assert.equal(contextForPrompt(original, true), contextForPrompt(swapped, true));
+  assert.notEqual(contextForPrompt(original), contextForPrompt(swapped), "默认分析依据不改成训练顺序");
+  assert.notEqual(contextForPrompt(original, true), contextForPrompt({ ...original, confirmedUserFacts: ["新版已确认事实"] }, true));
+  const payload = JSON.parse(contextForPrompt(original, true));
+  assert.deepEqual(payload.同岗位既有最终确认答案, original.confirmedPreviousAnswers, "时间顺序不是无序集合");
+  assert.ok(!payload.A_用户本人已确认事实.join("").includes("20个"));
+  assert.equal(JSON.stringify(original), before);
+  const second = contextForPrompt({ ...original, currentQuestion: "变化的问题", userAnswer: "新的回答", foundationKnowledge: ["本题不同知识点"] }, true);
+  const prefix = (value: string) => value.slice(0, value.indexOf('"当前问题"'));
+  assert.equal(prefix(contextForPrompt(original, true)), prefix(second));
+  assert.doesNotMatch(second, /原回答甲/);
+});
+
+test("流式CRLF跨网络块及不同usage尾帧均不漏算、不重复累加，空usage不覆盖有效值", () => {
+  for (const choices of [[{ delta: {}, finish_reason: "stop" }], []]) {
+    const stream = 'data: {"choices":[{"delta":{"content":"回答"}}]}\r\n\r\n' + `data: ${JSON.stringify({ choices, usage: { prompt_tokens: 100, completion_tokens: 20, prompt_cache_hit_tokens: 80, prompt_cache_miss_tokens: 20, completion_tokens_details: { reasoning_tokens: 12 } } })}\r\n\r\n` + 'data: {"usage":{}}\r\n\r\ndata: [DONE]';
+    for (let split = 0; split <= stream.length; split++) {
+      const collector = new SseUsageCollector();
+      collector.push(stream.slice(0, split), 10); collector.push(stream.slice(split), 20); collector.flush(20);
+      assert.equal(collector.usage()?.cacheHitTokens, 80, `split ${split}`);
+      assert.equal(collector.usage()?.outputTokens, 20);
+      assert.equal(collector.usage()?.reasoningTokens, 12);
+    }
+  }
+});
+
+test("usage缺失、字段冲突或不一致不能制造零命中或完整计费，Responses别名可读取", () => {
+  for (const raw of [undefined, {}, { prompt_tokens: 100, completion_tokens: 20 }, { prompt_tokens: 100, completion_tokens: 20, prompt_cache_hit_tokens: 0, prompt_tokens_details: { cached_tokens: 80 } }, { prompt_tokens: 100, prompt_cache_hit_tokens: 80, prompt_cache_miss_tokens: 80 }, { prompt_tokens: 100, prompt_cache_hit_tokens: 101 }]) {
+    const usage = extractTokenUsage(raw);
+    assert.equal(usage.cacheHitTokens, null); assert.equal(usage.cacheMissTokens, null);
+  }
+  assert.equal(extractTokenUsage({ prompt_tokens: 100, completion_tokens: 20, total_tokens: 119 }).totalTokens, null);
+  assert.equal(extractTokenUsage({ input_tokens: 100, output_tokens: 20, input_tokens_details: { cached_tokens: 80 } }).cacheMissTokens, 20);
+  assert.equal(extractTokenUsage({ prompt_tokens: 100, prompt_cache_hit_tokens: 0 }).cacheHitTokens, 0, "明确报告的零必须保留");
 });

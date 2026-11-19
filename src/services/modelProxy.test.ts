@@ -20,6 +20,7 @@ const upstream = createServer((req, res) => {
     const marker = JSON.parse(body).messages[0].content;
     if (marker === "anonymous invalid envelope") { res.setHeader("Content-Type", "application/json"); res.end("not-json"); return; }
     if (marker === "anonymous truncated output") { res.setHeader("Content-Type", "application/json"); res.end(JSON.stringify({ choices: [{ message: { content: '{"incomplete":' }, finish_reason: "length" }], usage: { prompt_tokens: 30, completion_tokens: 40, prompt_cache_hit_tokens: 10, prompt_cache_miss_tokens: 20, completion_tokens_details: { reasoning_tokens: 25 } } })); return; }
+    if (marker === "anonymous malformed JSON") { res.setHeader("Content-Type", "application/json"); res.end(JSON.stringify({ choices: [{ message: { content: '[{"title":"匿名候选","action":"访谈' }, finish_reason: "stop" }], usage: { prompt_tokens: 31, completion_tokens: 41 } })); return; }
     if (JSON.parse(body).messages[0].content === "anonymous experience questions") {
       const request = JSON.parse(body);
       res.setHeader("Content-Type", "application/json");
@@ -86,6 +87,19 @@ test("专项题使用有界JSON与DeepSeek非思考参数，独立计量；400�
   assert.match(log, /"feature":"experience_question_generation"/);
   assert.doesNotMatch(log, /anonymous experience questions/);
 });
+test("整份简历专项沿用同一预算保护、JSON参数和独立用量标识", async () => {
+  const response = await fetch(`${base}/api/model/chat`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ feature: "resume_question_generation", messages: [{ role: "user", content: "anonymous experience questions" }] }) });
+  assert.equal(response.status, 200);
+  const data = await response.json(), sent = JSON.parse(data.content);
+  assert.equal(sent.model, "deepseek-flash");
+  assert.equal(sent.max_tokens, 2048);
+  assert.deepEqual(sent.thinking, { type: "disabled" });
+  assert.deepEqual(sent.response_format, { type: "json_object" });
+  const events = (await readFile(path.join(usageDirectory, "usage.jsonl"), "utf8")).trim().split("\n").map(line => JSON.parse(line));
+  const saved = events.find(event => event.requestId === data.metrics.requestId && event.status === "succeeded");
+  assert.equal(saved.feature, "resume_question_generation");
+  assert.equal(saved.inputTokens, 50); assert.equal(saved.outputTokens, 80);
+});
 test("资料分类与汇总沿用代理预算和用量日志，各自使用有界JSON参数", async () => {
   for (const feature of ["material_organization", "material_summary"]) {
     const response = await fetch(`${base}/api/model/chat`, { method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({feature,messages:[{role:"user",content:"anonymous experience questions"}]}) });
@@ -150,16 +164,21 @@ test("代理转发流式响应时采集最终 usage，且日志不包含提示�
   assert.ok(typeof event.firstTokenLatencyMs === "number" && event.firstTokenLatencyMs >= 0);
 });
 
-test("代理记录结构化异常阶段、真实思考Token及截断，不把传输成功当业务成功", async () => {
+test("代理将格式损坏和截断的模型内容记为失败，不把传输成功当业务成功", async () => {
   const invalid = await fetch(`${base}/api/model/chat`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ messages: [{ role: "user", content: "anonymous invalid envelope" }] }) });
   assert.equal(invalid.status, 502);
   const truncated = await fetch(`${base}/api/model/chat`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ feature: "experience_extraction", messages: [{ role: "user", content: "anonymous truncated output" }] }) });
-  assert.equal(truncated.status, 200, "不改已有客户端格式校验流程"); await truncated.json();
+  assert.equal(truncated.status, 422); assert.equal((await truncated.json()).code, "llm_invalid_json");
+  const malformed = await fetch(`${base}/api/model/chat`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ feature: "experience_extraction", messages: [{ role: "user", content: "anonymous malformed JSON" }] }) });
+  assert.equal(malformed.status, 422); assert.equal((await malformed.json()).code, "llm_invalid_json");
   const events = (await readFile(path.join(usageDirectory, "usage.jsonl"), "utf8")).trim().split("\n").map(line => JSON.parse(line));
   const bad = events.find(event => event.errorCode === "invalid_response_json");
   assert.equal(bad.diagnostics.phase, "response_json"); assert.equal(bad.inputTokens, null);
   const cut = events.find(event => event.diagnostics?.finishReason === "length");
   assert.equal(cut.diagnostics.phase, "output_truncated"); assert.equal(cut.diagnostics.contentJsonValid, false);
+  assert.equal(cut.status, "failed"); assert.equal(cut.errorCode, "output_invalid_json");
+  const invalidContent = events.find(event => event.diagnostics?.phase === "content_json");
+  assert.equal(invalidContent.status, "failed"); assert.equal(invalidContent.errorCode, "output_invalid_json");
   assert.equal(cut.reasoningTokens, 25); assert.equal(cut.nonReasoningOutputTokens, 15);
   assert.equal(cut.firstTokenLatencyMs, null, "非流式首Token不可测");
 });

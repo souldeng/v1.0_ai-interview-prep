@@ -26,13 +26,13 @@ export function toProjectQuestion(question: Question): InterviewQuestion {
     id: question.id,
     category: question.category,
     question: question.text,
-    whyAsk: question.source,
+    whyAsk: question.projectDeepDive?.whyAsk ?? question.source,
     answerGuide: ["说明背景与目标", "突出你的具体行动", "用可验证的结果和复盘收束"],
     difficulty: "medium",
     status: "unanswered",
     userAnswer: "",
     feedback: null,
-    followUpQuestions: [],
+    followUpQuestions: question.projectDeepDive?.followUps ?? [],
     score: null,
   };
 }

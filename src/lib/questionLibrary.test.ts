@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createPreparation, nextTurn, startSession } from "./interview";
-import { createInterviewProject, updateProjectFromSession } from "./projects";
-import { buildLibraryQuestions, createReuseDraft, emptyQuestionLibrary, loadQuestionLibrary, saveQuestionLibrary, toggleLibraryFavorite } from "./questionLibrary";
+import { createInterviewProject, toProjectQuestion, updateProjectFromSession } from "./projects";
+import { buildLibraryQuestions, createJobRecommendedQuestion, createReuseDraft, deleteExperienceSet, deleteJobRecommendedQuestion, deleteRecordedQuestion, deleteResumeSet, emptyQuestionLibrary, loadQuestionLibrary, saveQuestionLibrary, toggleLibraryFavorite, validQuestionLibrary } from "./questionLibrary";
+import type { QuestionLibraryState } from "./questionLibrary";
 import type { StorageLike } from "./projectStorage";
 import { saveFinalAnswer } from "./coaching";
 import { loadProjects, saveProject } from "./projectStorage";
@@ -76,4 +77,84 @@ test("引用复制确认答案为独立目标草稿，存储刷新后可读回",
   const state = { ...emptyQuestionLibrary(), reuseDrafts: [draft] }; const storage = memory(); saveQuestionLibrary(state, storage);
   const restored = loadQuestionLibrary(storage); assert.equal(restored.reuseDrafts[0].answer, "这是来源岗位的最终确认答案。"); assert.equal(restored.reuseDrafts[0].targetProjectId, "job-b");
   assert.equal(buildLibraryQuestions([sourceProject, second.project], [], restored).find(item => item.projectId === "job-b")?.finalAnswer, "");
+});
+
+test("推荐题加入岗位专项题库：来源可追溯、训练后与训练记录合并且不产生重复条目", () => {
+  const item = project("job-a", "岗位 A");
+  const rec = createJobRecommendedQuestion("job-a", "analysis-1", 0, "推荐题：如何为一个虚构对话产品设计评测集？");
+  assert.equal(rec.id.startsWith("jobrec-"), true);
+  const state = { ...emptyQuestionLibrary(), jobRecommendedQuestions: [rec] };
+  assert.equal(validQuestionLibrary(state), true);
+  // 未训练时条目可见并归属岗位
+  const before = buildLibraryQuestions([item.project], [], state).find(entry => entry.recommendedQuestionId === rec.id)!;
+  assert.equal(before.projectId, "job-a");
+  assert.equal(before.questionId, "analysis:job-a:analysis-1:0");
+  assert.equal(before.answerStatus, "unanswered");
+  assert.equal(before.sourceType, "analysis_recommendation");
+  // 工厂拒绝非法输入
+  assert.throws(() => createJobRecommendedQuestion("", "analysis-1", 0, "题"));
+  assert.throws(() => createJobRecommendedQuestion("job-a", "analysis-1", 12, "题"));
+  assert.throws(() => createJobRecommendedQuestion("job-a", "analysis-1", 0, "   "));
+  assert.equal(validQuestionLibrary({ ...state, jobRecommendedQuestions: [{ ...rec, id: "bad-id" }] }), false);
+  // 训练后：题库条目与训练记录合并为一条，原答/最终答案可读，不产生互不关联副本
+  const question = { id: "analysis:job-a:analysis-1:0", text: "推荐题：如何为一个虚构对话产品设计评测集？", category: "方案与业务" as const, technical: false, sourceType: "analysis_recommendation" as const, source: "AI 岗位分析推荐（非企业面试原题）" };
+  let session = startSession({ ...item.prep, questions: [question] });
+  session = nextTurn(session, "训练原答：本人设计评测集并核对覆盖。", { action: "next" });
+  session = saveFinalAnswer(session, 0, "训练最终答案：评测集覆盖三组场景。");
+  const trainedProject = updateProjectFromSession({ ...item.project, questions: session.questions.map(toProjectQuestion), totalQuestions: 1 }, session);
+  const entries = buildLibraryQuestions([trainedProject], [], state);
+  const merged = entries.filter(entry => entry.questionId === "analysis:job-a:analysis-1:0");
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0].recommendedQuestionId, rec.id);
+  assert.equal(merged[0].originalAnswer, "训练原答：本人设计评测集并核对覆盖。");
+  assert.equal(merged[0].finalAnswer, "训练最终答案：评测集覆盖三组场景。");
+  assert.equal(merged[0].answerStatus, "final");
+});
+
+test("删除题目/题组只移除题库索引与对应收藏，不牵连其它数据", () => {
+  const rec = createJobRecommendedQuestion("job-a", "analysis-1", 0, "推荐题：如何设计评测集？");
+  const now = "2026-11-12T00:00:00.000Z";
+  const state = { ...emptyQuestionLibrary(),
+    favorites: ["recorded:recorded-x", "recorded:recorded-y", `jobrec:${rec.id}`],
+    recordedQuestions: [
+      { id: "recorded-x", question: "本人题一", createdAt: now },
+      { id: "recorded-y", question: "本人题二", createdAt: now },
+    ],
+    jobRecommendedQuestions: [rec],
+    experienceSets: [{ id: "set-1", experienceId: "card-1", title: "专项一", contentVersion: "v1", createdAt: now, questions: [] }],
+    resumeSets: [{ id: "rset-1", title: "简历题组", createdAt: now, contentVersion: "v1", sources: [], questions: [] }],
+  } as unknown as QuestionLibraryState;
+  const afterRec = deleteRecordedQuestion(state, "recorded-x");
+  assert.equal(afterRec.recordedQuestions!.length, 1);
+  assert.deepEqual(afterRec.favorites, ["recorded:recorded-y", `jobrec:${rec.id}`]);
+  assert.equal(afterRec.jobRecommendedQuestions!.length, 1);
+  assert.throws(() => deleteRecordedQuestion(afterRec, "recorded-x"));
+  const afterJobRec = deleteJobRecommendedQuestion(afterRec, rec.id);
+  assert.equal(afterJobRec.jobRecommendedQuestions, undefined);
+  assert.equal(afterJobRec.favorites.includes(`jobrec:${rec.id}`), false);
+  const afterExpSet = deleteExperienceSet(afterJobRec, "set-1");
+  assert.equal(afterExpSet.experienceSets, undefined);
+  const afterResumeSet = deleteResumeSet(afterExpSet, "rset-1");
+  assert.equal(afterResumeSet.resumeSets, undefined);
+  assert.equal(validQuestionLibrary(afterResumeSet), true);
+  assert.throws(() => deleteResumeSet(afterResumeSet, "rset-1"));
+  // 删除操作不触碰 reuseDrafts 等其它字段
+  const withDraft = { ...afterResumeSet, reuseDrafts: [] };
+  assert.deepEqual(deleteRecordedQuestion(withDraft, "recorded-y").reuseDrafts, []);
+});
+
+test("岗位多题训练的回答在题库中显示岗位并可按岗位筛选，最终答案仍写入独立记录", () => {
+  const preparation = createPreparation("", "");
+  const question = { ...preparation.questions[0], id: "recorded-gov-1", text: "请说明政府事务岗位的对外沟通策略。", sourceType: "ai_prediction" as const, source: "AI 预测题；仅供练习。" };
+  const owned = { ...preparation, job: { ...preparation.job, title: "AI 预测题练习", projectId: "project-gov", projectName: "政府事务" }, questions: [question] };
+  const session = nextTurn(startSession(owned, 1), "先说明沟通对象，再说明节奏。", { action: "next" });
+  const entries = buildLibraryQuestions([], [session], emptyQuestionLibrary());
+  const entry = entries.find(item => item.questionId === question.id)!;
+  assert.equal(entry.projectName, "政府事务");
+  assert.equal(entry.associatedProjectId, "project-gov");
+  // 岗位归属只是显示与筛选依据，不伪造岗位会话 ID，最终答案仍写入独立历史。
+  assert.equal(entry.projectId, null);
+  assert.equal(entry.sessionId, session.id);
+  const filtered = entries.filter(item => (item.associatedProjectId ?? item.projectId) === "project-gov");
+  assert.equal(filtered.length, 1);
 });

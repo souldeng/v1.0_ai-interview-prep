@@ -85,12 +85,12 @@ test("已有训练取消不变，保存失败不启动，归档后原答最终�
   await page.getByRole("button", { name: "开始练习", exact: true }).nth(1).click();
   await page.evaluate(() => { const saved = Storage.prototype.setItem; (window as any).restoreStorage = () => { Storage.prototype.setItem = saved; }; Storage.prototype.setItem = function(key, value) { if (key === "ai-interview-prep-history-v1") throw new Error("匿名训练保存失败"); saved.call(this,key,value); }; });
   const dialog = page.getByRole("dialog", { name: "开始新一轮训练" });
-  await dialog.getByRole("button", { name: "保存旧轮次并开始", exact: true }).click();
+  await dialog.getByRole("button", { name: "暂存并开始新练习", exact: true }).click();
   await expect(dialog.getByRole("alert")).toContainText("保存失败");
   expect(await page.evaluate(() => localStorage.getItem("ai-interview-prep-history-v1"))).toBe(before[0]);
   await page.screenshot({ path: info.outputPath("experience-save-failure.png"), fullPage: true });
   await page.evaluate(() => (window as any).restoreStorage());
-  await dialog.getByRole("button", { name: "保存旧轮次并开始", exact: true }).click();
+  await dialog.getByRole("button", { name: "暂存并开始新练习", exact: true }).click();
   await expect(page.getByRole("heading", { name: questions[1], exact: true })).toBeVisible();
   const saved = await page.evaluate(() => JSON.parse(localStorage.getItem("ai-interview-prep-history-v1")!));
   expect(saved).toHaveLength(2); expect(saved.find((s: any) => s.id === original.id)).toEqual(original);

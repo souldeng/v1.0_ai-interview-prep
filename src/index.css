@@ -1,69 +1,88 @@
 @import "tailwindcss";
+@import "tw-animate-css";
 @plugin "@tailwindcss/typography";
+
+/* dark: 仅在显式 .dark 容器内生效，避免系统深色模式影响浅色产品界面。 */
+@custom-variant dark (&:is(.dark *));
 
 @theme {
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
   --font-serif: "Playfair Display", serif;
-  --color-slate-50: #FAF8F4;
-  --color-slate-100: #F1E9DF;
-  --color-slate-200: #E5D8CA;
-  --color-slate-300: #D5C4B4;
-  --color-slate-400: #9C8878;
-  --color-slate-500: #716257;
-  --color-slate-600: #5C4D43;
-  --color-slate-700: #493B32;
-  --color-slate-800: #3E342D;
-  --color-slate-900: #342D27;
-  --color-slate-950: #342D27;
-  --color-blue-50: #FBF1EA;
-  --color-blue-100: #F2DDD0;
-  --color-blue-200: #E5C0AB;
-  /* #B77555 is the brand accent. Buttons use a slightly darker warm tone so
-     their small white labels meet WCAG AA contrast requirements. */
-  --color-blue-600: #B77555;
-  --color-blue-700: #8C563E;
-  --color-blue-800: #6D3D2A;
+  /* 方案 A：slate 使用 Tailwind 冷灰默认值（暖色覆盖已移除）。 */
+  /* 品牌蓝族重定向到靛蓝：存量 bg-blue-700 等类自动获得品牌主色（白字 6.29:1 AA）。 */
+  --color-blue-50: #EEF2FF;
+  --color-blue-100: #E0E7FF;
+  --color-blue-200: #C7D2FE;
+  --color-blue-600: #4F46E5;
+  --color-blue-700: #4F46E5;
+  --color-blue-800: #4338CA;
 }
 
-@layer base {
-  :root {
-  --warm-accent: #B77555;
-  --warm-action: #8C563E;
-    --background: 35 27% 97%;
-    --foreground: 25 14% 18%;
-    --card: 35 27% 97%;
-    --card-foreground: 25 14% 18%;
-    --popover: 35 27% 97%;
-    --popover-foreground: 25 14% 18%;
-    --primary: 20 39% 53%;
-    --primary-foreground: 0 0% 100%;
-    --secondary: 28 32% 91%;
-    --secondary-foreground: 25 14% 18%;
-    --muted: 28 32% 91%;
-    --muted-foreground: 20 14% 40%;
-    --accent: 21 52% 95%;
-    --accent-foreground: 20 39% 35%;
-    --destructive: 0 72% 42%;
-    --destructive-foreground: 0 0% 100%;
-    --border: 26 30% 86%;
-    --input: 26 30% 86%;
-    --ring: 20 39% 53%;
-    --radius: 0.75rem;
-  }
+/* AI 面试通语义 token —— 方案 A：冷白 + 石墨黑 + 靛蓝（shadcn 兼容）。 */
+:root {
+  --background: #F8FAFC;
+  --foreground: #111827;
+  --card: #FFFFFF;
+  --card-foreground: #111827;
+  --popover: #FFFFFF;
+  --popover-foreground: #111827;
+  --primary: #4F46E5;
+  --primary-foreground: #FFFFFF;
+  --secondary: #F1F5F9;
+  --secondary-foreground: #111827;
+  --muted: #F1F5F9;
+  --muted-foreground: #64748B;
+  --accent: #EEF2FF;
+  --accent-foreground: #4338CA;
+  /* 状态色独立保留：危险红不并入靛蓝；成功绿用 emerald 类；警示琥珀用 amber 类。 */
+  --destructive: #B33A2C;
+  --destructive-foreground: #FFFFFF;
+  --border: #E5E7EB;
+  --input: #E5E7EB;
+  --ring: #4F46E5;
+  --radius: 0.75rem;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  /* 圆角阶梯保持 Tailwind 默认值，避免影响既有页面的 rounded-md/lg 观感。 */
+  --radius-sm: 0.25rem;
+  --radius-md: 0.375rem;
+  --radius-lg: 0.5rem;
+  --radius-xl: 0.75rem;
 }
 
 @layer base {
   * {
-    border-color: #E5D8CA;
+    border-color: var(--border);
   }
   body {
-    background-color: #FAF8F4;
-    color: #342D27;
+    background-color: var(--background);
+    color: var(--foreground);
     font-family: "Inter", ui-sans-serif, system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     background-image: none;
+    font-size: 1rem;
   }
 }
 
@@ -75,18 +94,18 @@
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #BFA998;
+  background: #CBD5E1;
   border-radius: 10px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #957B68;
+  background: #94A3B8;
 }
 
 /* Glassmorphism Utility */
 .glass {
-  background: rgba(250, 248, 244, 0.92);
+  background: rgba(255, 255, 255, 0.92);
   backdrop-filter: blur(12px);
-  border: 1px solid rgb(226 232 240);
+  border: 1px solid var(--border);
 }
 
 .bento-grid {
@@ -103,5 +122,25 @@
 }
 
 .form-control {
-  @apply w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-700 focus:ring-2 focus:ring-blue-100 aria-invalid:border-red-500 aria-invalid:focus:border-red-600 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500;
+  @apply w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-base text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-700 focus:ring-2 focus:ring-blue-100 aria-invalid:border-red-500 aria-invalid:focus:border-red-600 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500;
+}
+
+main .text-xs,
+main .text-sm {
+  font-size: 1rem;
+  line-height: 1.5rem;
+}
+
+/* 最小冲突豁免：Badge 固定 h-5 高度内 16px 文字会溢出，恢复其设计字号；
+   其余 shadcn 组件（按钮/输入等）保持全局 16px 基准不受影响。 */
+main [data-slot="badge"].text-xs {
+  font-size: 12px;
+  line-height: 16px;
+}
+
+button,
+input,
+select,
+textarea {
+  font-size: 1rem;
 }

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildLibraryQuestions, createRecordedQuestion, emptyQuestionLibrary, loadQuestionLibrary, recordedPracticeQuestion, saveQuestionLibrary, validQuestionLibrary, QUESTION_LIBRARY_KEY } from "./questionLibrary";
+import { buildLibraryQuestions, createImportSource, createRecordedQuestion, createRecordedQuestions, emptyQuestionLibrary, loadQuestionLibrary, recordedPracticeQuestion, saveQuestionLibrary, validQuestionLibrary, QUESTION_LIBRARY_KEY } from "./questionLibrary";
 import { questionSourceLabel } from "./questionSource";
 import { buildInterviewContext } from "./interviewContext";
 import { emptyUserProfile } from "./profileStorage";
@@ -61,8 +61,28 @@ test("两岗位同问句具有独立身份与思路；未关联或已删岗位�
   assert.equal(entries.find(item => item.recordedQuestionId === qb.id)!.associatedProjectId, "job-B");
   assert.match(recordedPracticeQuestion(solo, [a, b]).source, /未关联岗位/);
   assert.match(recordedPracticeQuestion(qa, [b]).source, /原关联岗位不可用/);
-  assert.deepEqual(["user_recorded", "analysis_recommendation", "third_party", "foundation"].map(sourceType => questionSourceLabel({ sourceType })), ["本人记录的真实面试问题", "AI 分析推荐", "第三方面经", "内置基础题"]);
+  assert.deepEqual(["user_recorded", "ai_prediction", "analysis_recommendation", "third_party", "foundation"].map(sourceType => questionSourceLabel({ sourceType })), ["本人记录的真实面试问题", "AI 预测题", "AI 分析推荐", "第三方面经", "内置基础题"]);
   assert.deepEqual(buildInterviewContext({ profile, currentQuestion: "我落地了20个AI项目吗？" }).confirmedUserFacts, []);
+});
+
+test("AI 预测题沿用同一题库和训练会话，但始终保留预测来源边界", () => {
+  const source = createImportSource("匿名 AI 预测题", "## A. 技术判断\n1. 如何评估检索结果？", [], "ai_prediction", new Date("2026-11-13T00:00:00.000Z"));
+  const [item] = createRecordedQuestions([{ question: "如何评估检索结果？", category: "A. 技术判断", order: 1 }], source.id, "ai_prediction", new Date("2026-11-13T00:00:00.000Z"));
+  const storage = memory();
+  saveQuestionLibrary({ ...emptyQuestionLibrary(), importSources: [source], recordedQuestions: [item] }, storage);
+  const state = loadQuestionLibrary(storage);
+  assert.equal(state.importSources?.[0].sourceType, "ai_prediction");
+  assert.equal(state.recordedQuestions?.[0].sourceType, "ai_prediction");
+  const question = recordedPracticeQuestion(state.recordedQuestions![0], []);
+  assert.equal(question.sourceType, "ai_prediction");
+  assert.match(question.source, /不是企业真实面试记录、第三方面经或已确认个人事实/);
+  assert.equal(questionSourceLabel(question), "AI 预测题");
+  const preparation = trustedPreparation(buildInterviewContext({ profile: emptyUserProfile() }), [question]);
+  const session = nextTurn(startSession(preparation), "我会先说明评估目标和对照方法。", { action: "next" });
+  const entry = buildLibraryQuestions([], [session], state).find(value => value.recordedQuestionId === item.id)!;
+  assert.equal(entry.sourceType, "ai_prediction");
+  assert.equal(entry.importSourceId, source.id);
+  assert.deepEqual(buildInterviewContext({ profile: emptyUserProfile() }).confirmedUserFacts, []);
 });
 
 test("真实题备份导入在题库写入失败时回滚已有资料，不产生半份导入数据", () => {

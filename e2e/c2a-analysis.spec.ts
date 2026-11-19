@@ -21,8 +21,8 @@ async function seed(page: Page, items = [fixture()]) {
     if (!localStorage.getItem("ai-interview-projects-v1")) localStorage.setItem("ai-interview-projects-v1", JSON.stringify(jobs));
     if (!localStorage.getItem(key)) localStorage.setItem(key, JSON.stringify(user));
   }, { jobs: items, user: profile(), key: PROFILE_KEY });
-  await page.goto("/"); await page.getByRole("button", { name: "查看岗位", exact: true }).first().click();
-  await page.getByRole("button", { name: "岗位分析", exact: true }).click();
+  await page.goto("/"); await page.getByRole("button", { name: "打开岗位工作台", exact: true }).click();
+  await page.getByRole("tab", { name: "岗位分析", exact: true }).click();
 }
 async function primary(page: Page, name: string) {
   const menu = page.getByRole("button", { name: "打开导航" }); if (await menu.isVisible()) await menu.click();
@@ -32,12 +32,12 @@ async function primary(page: Page, name: string) {
 test("AI 分析成功后切换模块和刷新仍可查看，依据详情默认收起", async ({ page }, info) => {
   await page.route("**/api/model/chat", route => route.fulfill({ json: { content: JSON.stringify({ requirements: [row] }) } }));
   await seed(page);
-  await page.getByRole("button", { name: "AI 分析岗位", exact: true }).click();
+  await page.getByRole("button", { name: "开始岗位分析", exact: true }).click();
   await expect(page.getByRole("heading", { name: row.requirement, exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "岗位资料", exact: true }).click();
-  await page.getByRole("button", { name: "岗位分析", exact: true }).click();
+  await page.getByRole("tab", { name: "岗位资料", exact: true }).click();
+  await page.getByRole("tab", { name: "岗位分析", exact: true }).click();
   await expect(page.getByRole("heading", { name: row.requirement, exact: true })).toBeVisible();
-  await page.reload(); await page.getByRole("button", { name: "查看岗位", exact: true }).first().click(); await page.getByRole("button", { name: "岗位分析", exact: true }).click();
+  await page.reload(); await page.getByRole("button", { name: "打开岗位工作台", exact: true }).click(); await page.getByRole("tab", { name: "岗位分析", exact: true }).click();
   await expect(page.getByRole("heading", { name: row.requirement, exact: true })).toBeVisible();
   await expect(page.getByText("分析依据与当前资料一致", { exact: true })).toBeVisible();
   await expect(page.getByText("生成时使用的资料", { exact: true })).not.toBeVisible();
@@ -49,7 +49,7 @@ test("离开分析页后保存失败仍明确指出原岗位，不能静默丢�
   let requested = false;
   await page.route("**/api/model/chat", async route => { requested = true; await ready; await route.fulfill({ json: { content: JSON.stringify({ requirements: [row] }) } }); });
   await seed(page, [fixture(), fixture("anonymous-analysis-B")]);
-  await page.getByRole("button", { name: "AI 分析岗位", exact: true }).click(); await expect.poll(() => requested).toBe(true);
+  await page.getByRole("button", { name: "开始岗位分析", exact: true }).click(); await expect.poll(() => requested).toBe(true);
   await page.getByRole("button", { name: "返回岗位列表", exact: true }).click();
   await page.locator("article").filter({ has: page.getByRole("heading", { name: "anonymous-analysis-B", exact: true }) }).getByRole("button", { name: "查看岗位", exact: true }).click();
   await page.evaluate(() => { const original = Storage.prototype.setItem; Storage.prototype.setItem = function(key, value) { if (key === "ai-interview-projects-v1") throw new DOMException("匿名离页容量不足", "QuotaExceededError"); original.call(this, key, value); }; });
@@ -72,7 +72,7 @@ test("请求途中离开并修改 JD，迟到分析保存到原岗位且不覆�
   let requested = false;
   await page.route("**/api/model/chat", async route => { requested = true; await ready; await route.fulfill({ json: { content: JSON.stringify({ requirements: [row] }) } }); });
   await seed(page, [fixture(), fixture("anonymous-analysis-B")]);
-  await page.getByRole("button", { name: "AI 分析岗位", exact: true }).click(); await expect.poll(() => requested).toBe(true);
+  await page.getByRole("button", { name: "开始岗位分析", exact: true }).click(); await expect.poll(() => requested).toBe(true);
   await page.getByRole("button", { name: "返回岗位列表", exact: true }).click();
   const card = (name: string) => page.locator("article").filter({ has: page.getByRole("heading", { name, exact: true }) });
   await card("anonymous-analysis-A").getByRole("button", { name: "编辑岗位", exact: true }).click();
@@ -94,7 +94,7 @@ test("请求途中离开并修改 JD，迟到分析保存到原岗位且不覆�
 test("不同岗位的分析严格隔离，无关查看和切页不误报陈旧", async ({ page }) => {
   await page.route("**/api/model/chat", route => route.fulfill({ json: { content: JSON.stringify({ requirements: [row] }) } }));
   await seed(page, [fixture(), fixture("anonymous-analysis-B")]);
-  await page.getByRole("button", { name: "AI 分析岗位", exact: true }).click();
+  await page.getByRole("button", { name: "开始岗位分析", exact: true }).click();
   await expect(page.getByText("分析依据与当前资料一致", { exact: true })).toBeVisible();
   await page.getByText("查看分析依据", { exact: true }).click();
   await expect(page.getByText("生成时使用的资料", { exact: true })).toBeVisible();
@@ -111,7 +111,7 @@ test("用户编辑并重新确认经历后分析陈旧，企业参考资料核�
   const item = fixture();
   item.materials = [{ id: "anonymous-company-reference", title: "匿名企业业务资料", kind: "reference", content: "企业提供客服工具。", source: "manual_text", reviewedAt: now, createdAt: now, updatedAt: now }];
   await page.route("**/api/model/chat", route => route.fulfill({ json: { content: JSON.stringify({ requirements: [row] }) } }));
-  await seed(page, [item]); await page.getByRole("button", { name: "AI 分析岗位", exact: true }).click();
+  await seed(page, [item]); await page.getByRole("button", { name: "开始岗位分析", exact: true }).click();
   await expect(page.getByText("分析依据与当前资料一致", { exact: true })).toBeVisible();
   await primary(page, "个人资料"); await page.getByRole("tab", { name: "我的经历", exact: true }).click();
   await page.locator("article").filter({ has: page.getByRole("heading", { name: "本人需求访谈", exact: true }) }).getByRole("button", { name: "编辑", exact: true }).click();
@@ -133,7 +133,7 @@ test("用户编辑并重新确认经历后分析陈旧，企业参考资料核�
 test("存储失败与无效模型响应不伪报保存成功，旧结果刷新保留", async ({ page }, info) => {
   let phase = 0;
   await page.route("**/api/model/chat", route => route.fulfill({ json: { content: JSON.stringify({ requirements: phase === 2 ? [] : [{ ...row, requirement: phase ? "不应假装已保存的新结果" : row.requirement }] }) } }));
-  await seed(page); await page.getByRole("button", { name: "AI 分析岗位", exact: true }).click();
+  await seed(page); await page.getByRole("button", { name: "开始岗位分析", exact: true }).click();
   await expect(page.getByText("分析依据与当前资料一致", { exact: true })).toBeVisible();
   await page.evaluate(() => { const original = Storage.prototype.setItem; (window as any).c2aNativeSetItem = original; Storage.prototype.setItem = function(key, value) { if (key === "ai-interview-projects-v1") throw new DOMException("匿名容量不足", "QuotaExceededError"); original.call(this, key, value); }; });
   phase = 1; await page.getByRole("button", { name: "重新分析", exact: true }).click();
@@ -162,7 +162,7 @@ test("JD 改变保留陈旧结果，重新分析失败仍可查看，成功追�
     version++;
     return route.fulfill({ json: { content: JSON.stringify({ requirements: [{ ...row, requirement: version === 1 ? row.requirement : "更新分析：新增知识库评测要求" }] }) } });
   });
-  await seed(page); await page.getByRole("button", { name: "AI 分析岗位", exact: true }).click();
+  await seed(page); await page.getByRole("button", { name: "开始岗位分析", exact: true }).click();
   await expect(page.getByText("分析依据与当前资料一致", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "返回岗位列表", exact: true }).click();
   await page.getByRole("button", { name: "编辑岗位", exact: true }).click();

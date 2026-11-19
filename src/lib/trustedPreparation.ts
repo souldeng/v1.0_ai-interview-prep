@@ -26,7 +26,9 @@ export function selectLocalQuestions(candidates: Question[]): Question[] {
   return uniqueQuestions([...chosen, ...candidates]).slice(0, 6);
 }
 
-export function trustedPreparation(context: InterviewContext, questions: Question[]): Preparation {
+/** Default entry points select six questions; an explicitly opened saved group may retain its full visible order. */
+export function trustedPreparation(context: InterviewContext, questions: Question[], questionLimit = 6): Preparation {
   const original = createPreparation(context.confirmedUserFacts.join("\n"), context.targetJob.jd);
-  return { ...original, job: { ...original.job, title: context.targetJob.title }, questions: questions.slice(0, 6) };
+  const limit = Number.isInteger(questionLimit) && questionLimit > 0 ? questionLimit : 6;
+  return { ...original, job: { ...original.job, title: context.targetJob.title }, questions: questions.slice(0, limit) };
 }

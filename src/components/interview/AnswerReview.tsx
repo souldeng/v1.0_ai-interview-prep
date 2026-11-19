@@ -1,13 +1,11 @@
 import { useState } from "react";
-import type { CoachFeedback, InterviewSession, Scorecard } from "../../lib/domain";
-import { compareFeedback, evaluateEvidence, observationLabels, questionForTurn, isKnowledgeQuestion, currentCoachReview } from "../../lib/coaching";
+import { ArrowLeft, CheckCircle2, ChevronLeft, Lightbulb, Save, Sparkles } from "lucide-react";
+import type { InterviewSession } from "../../lib/domain";
+import { currentCoachReview, evaluateEvidence, isKnowledgeQuestion, latestAnswer, questionForTurn } from "../../lib/coaching";
 import { loadDrafts, saveDraft } from "../../lib/drafts";
-
-export function EvidenceFeedback({ score }: { score: Scorecard }) {
-  return <section className="space-y-3 rounded-xl border border-blue-100 bg-blue-50/50 p-4"><h3 className="font-bold text-blue-950">回答依据核对 · 本地规则</h3><p className="text-xs text-slate-600">已提供只表示出现文字线索，不代表真实、正确或已掌握；缺失也可能是规则漏判。</p>
-    {(score.observations ?? []).map(o => <div key={o.id} className="rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-700"><p className="font-semibold text-slate-950">{o.label} · {observationLabels[o.status]}</p>{o.quotes.map((quote, i) => <blockquote key={i} className="mt-2 whitespace-pre-wrap break-words border-l-2 border-blue-300 pl-3">回答原句：「{quote}」</blockquote>)}{o.materialQuotes?.map((q, i) => <p key={i} className="mt-2 text-blue-800">材料原句：「{q}」</p>)}<p className="mt-2 text-slate-600">{o.explanation}</p><p className="mt-2">建议：{o.nextStep}</p></div>)}
-    <p className="text-sm text-slate-600">{score.referenceAnswer}</p></section>;
-}
+import { displayQuestionText } from "../../lib/interviewRecordParser";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 
 export interface AnswerReviewProps {
   session: InterviewSession;
@@ -17,77 +15,101 @@ export interface AnswerReviewProps {
   onRequestCoach?: (index: number) => Promise<string | null>;
   modelAvailable?: boolean;
   coachPending?: boolean;
+  turnIndex?: number;
+  onContinue?: () => void;
+  /** 单题练习结束流程简化：提供时以「完成训练」替代「下一题」，跳过冗余确认页。 */
+  onFinish?: () => void;
+  onExit?: () => void;
+  onReturnToSource?: () => void;
 }
 
-function CoachDetails({ coach, additionalOnly = false }: { coach: CoachFeedback; additionalOnly?: boolean }) {
-  const groups = additionalOnly
-    ? [["更多优点", coach.strengths.slice(2)], ["其他改进点", coach.issues.slice(2)], ["补充建议", coach.suggestions.slice(1)], ["需要学习", coach.studyTopics]] as const
-    : [["已经做得好的地方", coach.strengths], ["需要改进的地方", coach.issues], ["事实风险", coach.factRisks], ["补充建议", coach.suggestions], ["需要学习", coach.studyTopics]] as const;
-  return <div className="space-y-3 text-sm leading-6 text-slate-700">{groups.map(([label, items]) => items.length ? <div key={label}><p className="font-medium">{label}</p><ul className="list-disc pl-5">{items.map((item, i) => <li key={i} className="whitespace-pre-wrap break-words">{item}</li>)}</ul></div> : null)}{!additionalOnly && <p className="whitespace-pre-wrap break-words">回答思路：{coach.answerStructure}</p>}{coach.optimizedExample && <p className="whitespace-pre-wrap break-words">示例优化回答（需本人核对）：{coach.optimizedExample}</p>}</div>;
+const button = "inline-flex items-center justify-center gap-2 rounded-md px-4 py-2 text-[16px] font-medium transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50";
+const secondary = `${button} border border-border bg-white text-muted-foreground hover:bg-muted`;
+const primary = `${button} bg-primary text-white hover:bg-primary/90`;
+
+function TrainingHeader({ session, onExit, disabled }: Pick<AnswerReviewProps, "session" | "onExit"> & { disabled: boolean }) {
+  return <header className="border-b border-border bg-card">
+    <div className="mx-auto flex w-full max-w-[1376px] items-center justify-between gap-4 px-6 py-4 lg:px-8">
+      <Button variant="outline" onClick={onExit} disabled={!onExit || disabled}><ArrowLeft size={18}/>退出训练</Button>
+      <div className="min-w-0 text-right">
+        <p className="truncate text-[14px] text-muted-foreground">第 {session.currentQuestionIndex + 1} / {session.questions.length} 题</p>
+        <p className="truncate text-[16px] font-medium text-foreground">{session.preparation.job.title || "模拟训练"}</p>
+      </div>
+    </div>
+  </header>;
 }
 
-export function AnswerReview({ session, onRevise, onSaveFinal, onUnsaved, onRequestCoach, modelAvailable = false, coachPending = false }: AnswerReviewProps) {
-  const [index, setIndex] = useState(session.turns.length - 1);
+export function AnswerReview({ session, onRevise, onSaveFinal, onUnsaved, onRequestCoach, modelAvailable = false, coachPending = false, turnIndex, onContinue, onFinish, onExit, onReturnToSource }: AnswerReviewProps) {
+  const index = turnIndex ?? session.turns.length - 1;
   const turn = session.turns[index];
-  const draftKey = `retry:${session.id}:${index}`;
-  const [draft, setDraft] = useState(() => loadDrafts()[draftKey] ?? "");
-  const finalDraftKey = `final:${session.id}:${index}`;
-  const [finalDraft, setFinalDraft] = useState(() => loadDrafts()[finalDraftKey] ?? turn?.finalAnswer ?? "");
+  const retryKey = `retry:${session.id}:${index}`;
+  const finalKey = `final:${session.id}:${index}`;
+  const [retry, setRetry] = useState(() => loadDrafts()[retryKey] ?? "");
+  const [finalAnswer, setFinalAnswer] = useState(() => loadDrafts()[finalKey] ?? turn?.finalAnswer ?? "");
+  const [mode, setMode] = useState<"feedback" | "retry">("feedback");
   const [notice, setNotice] = useState("");
   const [saveFailed, setSaveFailed] = useState(false);
   if (!turn) return null;
+
   const question = questionForTurn(session, turn);
-  const versions = [{ answer: turn.answer, createdAt: session.createdAt }, ...(turn.revisions ?? [])];
   const coach = currentCoachReview(turn)?.feedback;
-  const legacyCoach = turn.aiCoach && !(turn.coachReviews ?? []).some(review => JSON.stringify(review.feedback) === JSON.stringify(turn.aiCoach)) ? turn.aiCoach : undefined;
+  const fallback = evaluateEvidence(latestAnswer(turn), question, session.preparation);
+  const suggestions = coach?.issues?.slice(0, 3) ?? fallback.improvement.split(/。\s*/).filter(Boolean).slice(0, 3);
+  const referenceAnswer = coach?.optimizedExample || coach?.answerStructure || fallback.referenceAnswer;
+  const versions = [{ answer: turn.answer, createdAt: session.createdAt }, ...(turn.revisions ?? [])];
   const failure = turn.coachFailure?.answerVersion === versions.length ? turn.coachFailure.message : null;
-  const feedback = evaluateEvidence(versions.at(-1)!.answer, question, session.preparation);
-  const comparison = versions.length > 1 ? compareFeedback(evaluateEvidence(versions.at(-2)!.answer, question, session.preparation), feedback) : null;
-  function update(value: string) {
-    setDraft(value);
-    try { saveDraft(draftKey, value); setSaveFailed(false); onUnsaved(false); setNotice("重答草稿已保存到本机。"); }
-    catch (e) { setSaveFailed(true); onUnsaved(true); setNotice(e instanceof Error ? e.message : "保存失败，请保留当前页面并重试。"); }
+
+  function persist(key: string, value: string, setter: (value: string) => void) {
+    setter(value);
+    try { saveDraft(key, value); setSaveFailed(false); onUnsaved(false); }
+    catch (error) { setSaveFailed(true); onUnsaved(true); setNotice(error instanceof Error ? error.message : "草稿未保存，请保留当前页面后重试。"); }
   }
-  function submit() {
-    const error = onRevise(index, draft);
+  function saveRetry() {
+    const error = onRevise(index, retry);
     if (error) { setNotice(error); return; }
-    update(""); setNotice("重答已保存，原回答保留；对比仅说明材料表述变化。");
+    persist(retryKey, "", setRetry);
+    setNotice("本次重答已保存，原回答仍可查看。");
+    setMode("feedback");
   }
-  function saveFinal(value: string) {
-    setFinalDraft(value);
-    try { saveDraft(finalDraftKey, value); setSaveFailed(false); onUnsaved(false); }
-    catch (error) { setSaveFailed(true); onUnsaved(true); setNotice(error instanceof Error ? error.message : "最终答案草稿未保存，请保留当前页面并重试。"); }
+  function saveFinal() {
+    const error = onSaveFinal(index, finalAnswer);
+    if (error) { setNotice(error); return; }
+    setNotice("最终确认答案已保存；原回答和重答未被覆盖。");
   }
-  return <section className="mx-auto mt-6 max-w-5xl space-y-4 border-t border-slate-200 pt-5">
-    <h2 className="text-xl font-bold text-slate-950">点评 → 重答 → 对比</h2>
-    <label className="block text-sm font-medium text-slate-700">选择已回答的问题<select disabled={saveFailed || coachPending} aria-label="选择已回答的问题" className="form-control mt-2" value={index} onChange={e => { const next = Number(e.target.value); setIndex(next); setDraft(loadDrafts()[`retry:${session.id}:${next}`] ?? ""); setFinalDraft(loadDrafts()[`final:${session.id}:${next}`] ?? session.turns[next]?.finalAnswer ?? ""); setNotice(""); }}>{session.turns.map((t, i) => <option key={i} value={i}>第 {i + 1} 轮：{t.question.slice(0, 60)}</option>)}</select></label>
-    <p className="whitespace-pre-wrap break-words text-sm text-slate-700">原问题：{turn.question}</p>
-    <section aria-label="当前回答反馈" className="rounded-xl border border-blue-100 bg-blue-50/40 p-4 text-sm leading-6 text-slate-700">
-      <h3 className="font-semibold text-slate-950">{coach ? "AI 教练反馈" : "本地辅助提示"}</h3>
-      {!coach && failure && <><p role="alert" className="mt-2 font-medium text-amber-900">AI 点评未完成，目前显示的是本地辅助提示</p><p className="text-xs text-slate-600">{failure}</p></>}
-      {!coach && !failure && <p className="mt-1 text-xs text-slate-600">{modelAvailable ? "当前回答尚未获得 AI 点评。" : "未配置 AI 服务；目前只提供本地表达辅助，不能判断专业知识正确性。"}</p>}
-      <p className="mt-1 text-xs text-slate-600">针对版本 {versions.length}；{coach ? "AI 建议需本人核对，不代表事实已核验或已经独立掌握。" : "文字线索不是事实核验，也不能判断专业知识是否正确或已经掌握。"}</p>
-      <h4 className="mt-3 font-medium text-slate-950">已经做得好的地方</h4>
-      <p className="whitespace-pre-wrap break-words">{coach ? (coach.strengths.slice(0, 2).join("；") || "本轮未指出有依据的优点。") : isKnowledgeQuestion(question) ? `已提供可讨论的回答：「${versions.at(-1)!.answer.slice(0, 100)}」。这不表示概念已答对。` : (feedback.observations?.filter(o => o.status === "provided").map(o => `写出了${o.label}相关表述`).join("；") || "已经提交回答；尚未识别到清楚的行动与结果表述，可核对原文。")}</p>
-      <h4 className="mt-3 font-medium text-slate-950">需要改进的地方</h4>
-      <p className="whitespace-pre-wrap break-words">{coach ? (coach.issues.slice(0, 2).join("；") || "本轮未指出主要问题，不代表没有遗漏。") : isKnowledgeQuestion(question) ? `围绕「${question.text}」核对概念、逻辑与遗漏要点；不懂的部分可以如实说明，需要专业资料或 AI 点评进一步检查。` : feedback.improvement}</p>
-      {coach?.suggestions[0] && <p className="mt-3 whitespace-pre-wrap break-words">{coach.suggestions[0]}</p>}
-      <h4 className="mt-3 font-medium text-slate-950">建议回答思路</h4><p className="whitespace-pre-wrap break-words">{coach?.answerStructure ?? feedback.referenceAnswer}</p>
-      {!coach && onRequestCoach && <button disabled={!modelAvailable || coachPending || saveFailed} onClick={async () => { const message = await onRequestCoach(index); if (message) setNotice(message); }} className="mt-3 rounded-lg bg-blue-700 px-4 py-2 text-sm font-medium text-white disabled:opacity-40">{coachPending ? "AI 点评中…" : failure ? "重试 AI 点评" : "请求 AI 点评"}</button>}
-    </section>
-    {coach?.factRisks.length ? <section role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950"><h3 className="font-semibold">事实风险 · 请核对</h3><ul className="list-disc pl-5">{coach.factRisks.map((risk, i) => <li key={i} className="whitespace-pre-wrap break-words">{risk}</li>)}</ul></section> : null}
-    {coach && <details className="rounded-lg border border-slate-200 p-3"><summary className="cursor-pointer text-sm font-medium text-slate-700">AI 补充建议与示例（需本人核对）</summary><div className="mt-3"><CoachDetails coach={coach} additionalOnly/>{coach.optimizedExample && <button onClick={() => saveFinal(coach.optimizedExample)} className="mt-3 rounded-lg border border-slate-300 px-3 py-2 text-sm">复制到待确认答案草稿</button>}</div></details>}
-    {feedback.observations?.filter(o => o.status === "contradiction").map(o => <p key={o.id} role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-900">事实风险：{o.quotes.join(" / ")}。{o.explanation}</p>)}
-    <details className="rounded-lg border border-slate-200 p-3"><summary className="cursor-pointer text-sm font-medium text-slate-700">历史回答与点评</summary><div className="mt-3 space-y-2">{versions.map((v, i) => <details key={i} open={i === versions.length - 1} className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-slate-700"><summary className="cursor-pointer font-medium">版本 {i + 1}{i === 0 ? " · 原回答" : " · 重答"}</summary><p className="mt-2 whitespace-pre-wrap break-words text-sm">{v.answer}</p></details>)}</div>
-    {(turn.coachReviews ?? []).filter(review => review.answerVersion !== versions.length).map(review => <details key={review.answerVersion} className="mt-2 rounded-lg border border-slate-200 p-3"><summary className="cursor-pointer text-sm text-slate-700">历史 AI 点评 · 回答版本 {review.answerVersion}</summary><p className="my-3 whitespace-pre-wrap break-words text-sm text-slate-600">对应回答：{review.answer}</p><CoachDetails coach={review.feedback}/></details>)}
-    </details>
-    <details className="rounded-lg border border-slate-200 p-3"><summary className="cursor-pointer text-sm font-medium text-slate-700">事实依据与规则检测详情</summary><div className="mt-3"><EvidenceFeedback score={feedback}/></div></details>
-    {legacyCoach?.factRisks.length ? <p role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">旧版点评的事实风险（未记录关联版本，请对照历史回答核对）：{legacyCoach.factRisks.join("；")}</p> : null}
-    {legacyCoach && <details className="rounded-lg border border-slate-200 p-3"><summary className="cursor-pointer text-sm text-slate-700">旧版 AI 点评 · 未记录关联版本，不能视为当前点评</summary><div className="mt-3"><CoachDetails coach={legacyCoach}/></div></details>}
-    {comparison && <details className="rounded-lg border border-blue-100 bg-blue-50/60 p-4 text-sm text-slate-700"><summary className="cursor-pointer font-medium text-slate-950">与上一版相比</summary><p className="mt-2">新增表述线索：{comparison.added.join("、") || "未识别到新增项"}</p><p>仍需补充或核对：{comparison.unresolved.join("、") || "未识别到缺失项，仍须人工核对"}</p><p>不再识别到的线索：{comparison.lost.join("、") || "无"}</p><p>仍无法判断：{comparison.unknown.join("、") || "无"}</p><p className="mt-2 text-slate-600">这不是能力提升证明，也不是事实认证。</p></details>}
-    <label className="block text-sm font-medium text-slate-700">围绕同一问题重新回答<p className="mt-1 text-xs font-normal text-slate-600">上方点评仅对应已保存的版本；编辑中的草稿尚未获得点评。</p><textarea aria-label="同题重答" maxLength={12000} className="form-control mt-2 min-h-36" value={draft} onChange={e => update(e.target.value)}/></label>
-    <div className="flex flex-wrap gap-3"><button onClick={submit} disabled={!draft.trim() || coachPending} className="rounded-lg bg-blue-700 px-4 py-2 text-sm font-medium text-white hover:bg-blue-800 disabled:opacity-40">保存重答并对比</button><button onClick={() => update(draft)} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">重试保存草稿</button></div>
-    <details className="rounded-xl border border-blue-200 bg-blue-50/70 p-4"><summary className="cursor-pointer font-semibold text-slate-950">保存我的回答思路</summary><p className="mt-1 text-sm leading-6 text-slate-600">保存你认可的思路；原回答和重答仍保留。</p><textarea aria-label="最终确认答案" value={finalDraft} maxLength={12000} onChange={event => saveFinal(event.target.value)} className="mt-3 min-h-32 w-full rounded-lg border border-slate-300 bg-white p-3 text-sm leading-6 text-slate-900 outline-none focus:border-blue-700" placeholder="基于真实材料整理最终回答…"/><button onClick={() => { const error = onSaveFinal(index, finalDraft); if (error) { setNotice(error); return; } saveFinal(""); setFinalDraft(finalDraft.trim()); setNotice("最终确认答案已保存；原回答和重答未被覆盖。"); }} disabled={!finalDraft.trim()} className="mt-3 rounded-lg bg-blue-700 px-4 py-2 text-sm font-medium text-white hover:bg-blue-800 disabled:opacity-40">保存最终答案</button></details>
-    {notice && <p role="status" className="text-sm text-slate-700">{notice}</p>}
-  </section>;
+  async function requestAdvice() {
+    if (!onRequestCoach) return;
+    const message = await onRequestCoach(index);
+    if (message) setNotice(message);
+  }
+
+  if (mode === "retry") return <div className="min-h-screen bg-background">
+    <TrainingHeader session={session} onExit={onExit} disabled={coachPending || saveFailed}/>
+    <main className="mx-auto w-full max-w-[1376px] p-6 lg:p-8">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3"><h1 className="text-[24px] font-semibold tracking-tight text-foreground">再答一次</h1><span className="rounded-full bg-amber-50 px-3 py-1 text-[13px] font-medium text-primary">第 {versions.length + 1} 版</span></div>
+        <p className="text-[14px] text-muted-foreground">只保留你认可的一版作为最终回答，原回答始终保留</p>
+      </div>
+      <div className="mt-4 grid gap-5 lg:grid-cols-[minmax(0,1fr)_300px]">
+        <section className="overflow-hidden rounded-[14px] border border-border bg-white">
+          <div className="border-b border-border px-5 py-4"><p className="text-[14px] font-medium text-muted-foreground">当前问题</p><h2 className="mt-1 whitespace-pre-wrap text-[18px] font-semibold leading-7 text-foreground">{displayQuestionText(turn.question)}</h2></div>
+          <div className="p-5"><label htmlFor="retry-answer" className="text-[16px] font-semibold text-foreground">重新组织你的回答</label><Textarea id="retry-answer" aria-label="同题重答" maxLength={12000} value={retry} onChange={event => persist(retryKey, event.target.value, setRetry)} placeholder="根据建议重新组织回答…" className="mt-3 min-h-[360px] w-full resize-y bg-white" disabled={coachPending}/><p className="mt-2 text-[13px] text-muted-foreground">草稿会随输入保存；保存本次重答不会覆盖原回答。</p></div>
+        </section>
+        <aside className="space-y-3"><section className="rounded-[14px] border border-border bg-white p-4"><div className="flex items-center gap-2 text-primary"><Lightbulb size={17}/><h2 className="text-[15px] font-semibold">AI 回答建议</h2></div><ul className="mt-3 space-y-2 text-[14px] leading-6 text-muted-foreground">{suggestions.map((item, itemIndex) => <li key={itemIndex} className="flex gap-2"><span className="text-primary">•</span><span>{item}</span></li>)}</ul></section><details className="rounded-lg border border-border bg-card p-3"><summary className="cursor-pointer text-[14px] font-medium text-muted-foreground">查看原回答</summary><p className="mt-3 whitespace-pre-wrap break-words text-[14px] leading-6 text-foreground">{turn.answer}</p></details><details className="rounded-lg border border-border bg-amber-50 p-3"><summary className="cursor-pointer text-[14px] font-medium text-muted-foreground">查看 AI 参考表达</summary><p className="mt-3 whitespace-pre-wrap break-words text-[14px] leading-6 text-foreground">{referenceAnswer}</p></details><section className="rounded-lg border border-border bg-white p-3"><p className="text-[13px] font-medium text-muted-foreground">已保存版本</p><p className="mt-1 text-[15px] text-foreground">原回答{turn.revisions?.length ? ` + ${turn.revisions.length} 次重答` : ""}{turn.finalAnswer ? " · 已保存最终回答" : ""}</p></section></aside>
+      </div>
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-3"><div className="flex flex-wrap gap-2"><Button variant="outline" onClick={() => setMode("feedback")} disabled={coachPending || saveFailed}><ChevronLeft size={17}/>返回建议</Button><Button variant="outline" onClick={() => persist(retryKey, retry, setRetry)} disabled={coachPending || saveFailed}><Save size={17}/>保存草稿</Button></div><Button data-cta="primary" onClick={saveRetry} disabled={!retry.trim() || coachPending || saveFailed}><CheckCircle2 size={17}/>保存这次回答</Button></div>
+      {notice && <p role="status" className="mt-4 text-[15px] text-muted-foreground">{notice}</p>}
+    </main>
+  </div>;
+
+  return <div className="min-h-screen bg-background">
+    <TrainingHeader session={session} onExit={onExit} disabled={coachPending || saveFailed}/>
+    <main className="mx-auto w-full max-w-[940px] p-6 lg:p-8">
+      <section><div className="flex flex-wrap items-center justify-between gap-3"><h2 className="text-[14px] font-medium text-primary">AI 回答建议</h2><span className="rounded-full bg-muted px-3 py-1 text-[13px] text-muted-foreground">第 {session.currentQuestionIndex + 1} / {session.questions.length} 题</span></div><h1 className="mt-2 whitespace-pre-wrap text-[20px] font-semibold leading-8 text-foreground">{displayQuestionText(turn.question)}</h1></section>
+      <section className="mt-4 flex items-start justify-between gap-4 rounded-lg bg-card px-4 py-3"><div className="min-w-0"><p className="text-[13px] font-medium text-muted-foreground">我的回答</p><p className="mt-1 line-clamp-2 whitespace-pre-wrap break-words text-[14px] leading-6 text-foreground">{latestAnswer(turn)}</p></div><span className="shrink-0 rounded-full bg-emerald-50 px-2.5 py-1 text-[12px] font-medium text-emerald-700">已保存</span></section>
+      <section aria-label="当前回答建议" className="mt-4 overflow-hidden rounded-[14px] border border-border bg-white"><div className="p-5"><div className="flex items-center gap-2 text-primary"><Sparkles size={18}/><h3 className="text-[18px] font-semibold text-foreground">这次回答可以这样更清楚</h3></div>{failure && <p role="alert" className="mt-4 rounded-lg bg-amber-50 p-3 text-[15px] leading-6 text-amber-800">AI 建议未完成：{failure}</p>}<div className="mt-4 grid gap-4 md:grid-cols-2"><section className="rounded-lg bg-card p-4"><h3 className="text-[15px] font-semibold text-foreground">优先改进</h3><ul className="mt-2 space-y-2 text-[15px] leading-6 text-muted-foreground">{suggestions.map((item, itemIndex) => <li key={itemIndex} className="flex gap-2"><span className="text-primary">•</span><span>{item}</span></li>)}</ul></section><section className="rounded-lg bg-amber-50 p-4"><h3 className="text-[15px] font-semibold text-foreground">表达顺序</h3><p className="mt-2 text-[15px] leading-6 text-muted-foreground">{coach?.answerStructure || (isKnowledgeQuestion(question) ? "先解释概念，再说明原理、应用与局限。" : "先交代背景与目标，再说本人行动、结果或产物，最后说明边界和反思。")}</p></section></div>{coach?.factRisks.length ? <section role="alert" className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4"><h3 className="text-[15px] font-semibold text-amber-800">需要核对</h3><ul className="mt-2 list-disc space-y-1 pl-5 text-[14px] leading-6 text-muted-foreground">{coach.factRisks.map((risk, riskIndex) => <li key={riskIndex}>{risk}</li>)}</ul></section> : null}<details className="mt-4 rounded-lg border border-border p-4"><summary className="cursor-pointer text-[15px] font-medium text-muted-foreground">查看 AI 参考表达</summary><p className="mt-3 whitespace-pre-wrap break-words text-[16px] leading-7 text-foreground">{referenceAnswer}</p></details>{!coach && <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg bg-card p-4"><p className="text-[14px] leading-6 text-muted-foreground">{modelAvailable ? "可以为当前回答重试获取 AI 建议。" : "当前使用本地表达提示；未虚构 AI 点评。"}</p>{onRequestCoach && <Button variant="outline" disabled={!modelAvailable || coachPending || saveFailed} onClick={() => void requestAdvice()}>{coachPending ? "正在生成建议…" : failure ? "重试获取建议" : "获取 AI 建议"}</Button>}</div>}</div><details className="border-t border-border bg-card p-5"><summary className="cursor-pointer text-[16px] font-semibold text-foreground">保存我的回答思路</summary><label htmlFor="final-answer" className="mt-3 block text-[16px] font-semibold text-foreground">保存我认可的最终回答</label><Textarea id="final-answer" aria-label="最终确认答案" value={finalAnswer} maxLength={12000} onChange={event => persist(finalKey, event.target.value, setFinalAnswer)} className="mt-3 min-h-36 w-full bg-white" placeholder="整理后保存你认可的回答…"/><div className="mt-3 flex flex-wrap gap-2"><Button data-cta="primary" onClick={saveFinal} disabled={!finalAnswer.trim() || saveFailed}><CheckCircle2 size={17}/>保存最终答案</Button></div></details></section>
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-3"><p className="text-[13px] text-muted-foreground">原回答与每次重答均保留，不会被建议覆盖。</p><div className="flex flex-wrap gap-2">{onReturnToSource && <Button variant="outline" onClick={onReturnToSource} disabled={coachPending || saveFailed}>返回资料题组</Button>}<Button variant="outline" onClick={() => setMode("retry")} disabled={coachPending || saveFailed}>再答一次</Button>{onFinish ? <Button data-cta="primary" onClick={onFinish} disabled={coachPending || saveFailed}><CheckCircle2 size={17}/>完成训练</Button> : <Button data-cta="primary" onClick={onContinue} disabled={!onContinue || coachPending || saveFailed}>下一题</Button>}</div></div>
+      <details className="mt-4 rounded-lg border border-border bg-white p-4"><summary className="cursor-pointer text-[15px] font-medium text-muted-foreground">查看回答版本</summary><div className="mt-3 space-y-3">{versions.map((version, versionIndex) => <section key={versionIndex} className="rounded-lg bg-card p-3"><p className="text-[13px] font-medium text-muted-foreground">{versionIndex === 0 ? "原回答" : `第 ${versionIndex + 1} 次回答`}</p><p className="mt-2 whitespace-pre-wrap break-words text-[14px] leading-6 text-foreground">{version.answer}</p></section>)}</div></details>
+      {notice && <p role="status" className="mt-4 text-[15px] text-muted-foreground">{notice}</p>}
+    </main>
+  </div>;
 }

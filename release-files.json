@@ -18,12 +18,14 @@
     "metadata.json",
     "release-files.json",
     "GITHUB_SYNC.md",
-    "THIRD_PARTY_NOTICES.md"
+    "THIRD_PARTY_NOTICES.md",
+    "scripts/github-sync-check.mjs",
+    "scripts/release-preview.mjs",
+    "scripts/usage-report.ts"
   ],
   "directories": [
     "src",
     "e2e",
-    "scripts",
     "test-fixtures"
   ],
   "excludedDirectories": [

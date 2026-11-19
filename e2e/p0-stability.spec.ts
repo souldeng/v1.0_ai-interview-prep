@@ -1,4 +1,4 @@
-import { libraryArea, openDetails } from "./uiActions";
+import { libraryArea, openDetails, openLibraryActions, pickSelectOption } from "./uiActions";
 import { expect, test, type Page } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 import { createPreparation, nextTurn, startSession } from "../src/lib/interview";
@@ -35,17 +35,19 @@ test("主问题与多轮旧ID追问可分别修改刷新，单题导出不串答
   await page.addInitScript(items => { if (!localStorage.getItem("ai-interview-projects-v1")) localStorage.setItem("ai-interview-projects-v1", JSON.stringify(items)); }, projects);
   await page.goto("/");
   await openPrimary(page, "AI 面试题库");
-  await page.getByRole("combobox", { name: "按岗位筛选" }).selectOption("anonymous-p0-job");
+  await pickSelectOption(page, "按岗位筛选", "anonymous-p0-job");
   const choose = (question: string) => page.getByRole("button").filter({ has: page.getByRole("heading", { name: question, exact: true }) }).click();
   await choose("主问题：说明你的需求访谈经验。");
   await openDetails(page, "保存我的回答思路");
   const final = page.getByRole("textbox", { name: "最终确认答案" });
+  await openDetails(page, "原回答");
   await expect(page.getByText("主轮原回答：我负责需求访谈。", { exact: true })).toBeVisible();
   await expect(final).toHaveValue("主轮最终答案：说明本人访谈行动。");
   await final.fill("修改主轮：保留追问一和追问二的成熟答案。");
   await page.getByRole("button", { name: "保存最终答案", exact: true }).click();
-  await openDetails(page, "导出准备记录");
-  const downloadPromise = page.waitForEvent("download"); await page.getByRole("button", { name: "导出 DOCX", exact: true }).click();
+  // 导出 DOCX 已收纳进题库"更多操作"菜单：先展开菜单再点条目，下载断言不变。
+  await openLibraryActions(page);
+  const downloadPromise = page.waitForEvent("download"); await page.getByRole("menuitem", { name: "导出 DOCX", exact: true }).click();
   const file = await downloadPromise;
   const bytes = await readFile((await file.path())!);
   expect(bytes.toString("utf8")).toContain("主轮原回答：我负责需求访谈。");
@@ -55,11 +57,11 @@ test("主问题与多轮旧ID追问可分别修改刷新，单题导出不串答
   await final.fill("修改追问二：继续保留主轮及追问一。"); await page.getByRole("button", { name: "保存最终答案", exact: true }).click();
   await page.reload(); 
   await openPrimary(page, "AI 面试题库");
-  await page.getByRole("combobox", { name: "按岗位筛选" }).selectOption("anonymous-p0-job");
+  await pickSelectOption(page, "按岗位筛选", "anonymous-p0-job");
   await choose("主问题：说明你的需求访谈经验。"); await expect(final).toHaveValue("修改主轮：保留追问一和追问二的成熟答案。");
   await choose("追问一：具体产物是什么？"); await expect(final).toHaveValue("追问一最终答案：说明需求记录产物。");
   await choose("追问二：职责边界是什么？"); await expect(final).toHaveValue("修改追问二：继续保留主轮及追问一。");
-  await page.getByRole("combobox", { name: "按岗位筛选" }).selectOption("anonymous-other-job");
+  await pickSelectOption(page, "按岗位筛选", "anonymous-other-job");
   await expect(final).toHaveValue("主轮最终答案：说明本人访谈行动。");
   await testInfo.attach("precise-answer-rounds.png", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" });
 });

@@ -1,4 +1,4 @@
-import { libraryArea, openDetails } from "./uiActions";
+import { libraryArea, openDetails, openRowMenu, pickSelectOption, practiceRecordedQuestion } from "./uiActions";
 import { expect, test, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { createPreparation, nextTurn, startSession } from "../src/lib/interview";
@@ -44,8 +44,8 @@ test("真实题无JD录入后直达原训练，来源不冒充认证，刷新后
   await page.screenshot({ path: info.outputPath("recorded-training.png"), fullPage: true });
   await page.reload(); await library(page);
   await expect(page.getByRole("heading", { name: question, exact: true }).first()).toBeVisible();
-  await page.getByRole("button", { name: "再次练习这道题", exact: true }).click();
-  await page.getByRole("dialog", { name: "开始新一轮训练" }).getByRole("button", { name: "保存旧轮次并开始", exact: true }).click();
+  await practiceRecordedQuestion(page);
+  await page.getByRole("dialog", { name: "开始新一轮训练" }).getByRole("button", { name: "暂存并开始新练习", exact: true }).click();
   await expect(page.getByRole("heading", { name: question, exact: true })).toBeVisible();
   await expect(page.getByRole("textbox", { name: "本轮回答", exact: true })).toHaveValue("");
 });
@@ -98,8 +98,8 @@ test("真实题点评追问重答最终思路刷新后可复练，题库编辑�
   await page.getByRole("textbox", { name: "最终确认答案", exact: true }).fill(final);
   await page.getByRole("button", { name: "保存最终答案", exact: true }).click();
   const before = await page.evaluate(() => JSON.parse(localStorage.getItem("ai-interview-prep-history-v1")!)[0]);
-  await page.getByRole("button", { name: "再次练习这道题", exact: true }).click();
-  await page.getByRole("dialog", { name: "开始新一轮训练" }).getByRole("button", { name: "保存旧轮次并开始", exact: true }).click();
+  await practiceRecordedQuestion(page);
+  await page.getByRole("dialog", { name: "开始新一轮训练" }).getByRole("button", { name: "暂存并开始新练习", exact: true }).click();
   await expect(page.getByRole("heading", { name: question, exact: true })).toBeVisible();
   await expect(page.getByRole("textbox", { name: "本轮回答", exact: true })).toHaveValue("");
   const old = await page.evaluate(id => JSON.parse(localStorage.getItem("ai-interview-prep-history-v1")!).find((item: any) => item.id === id), before.id);
@@ -127,7 +127,7 @@ test("独立训练未提交草稿时，录入新题须确认，取消后可继�
   await expect(dialog).toBeVisible();
   await dialog.getByRole("button", { name: "保留当前训练", exact: true }).click();
   expect(await page.evaluate(() => localStorage.getItem("ai-interview-prep-history-v1"))).toBe(before.history);
-  await page.getByRole("button", { name: "再次练习这道题", exact: true }).click();
+  await practiceRecordedQuestion(page);
   await dialog.getByRole("button", { name: "继续当前训练", exact: true }).click();
   await expect(page.getByRole("heading", { name: question, exact: true })).toBeVisible();
   await expect(page.getByRole("textbox", { name: "本轮回答", exact: true })).toHaveValue("旧题首答草稿：本人只负责需求访谈。");
@@ -157,7 +157,7 @@ test("刷新后仍有同题未完成独立训练时先确认，可继续旧会�
   await page.getByRole("textbox", { name: "本轮回答", exact: true }).fill("刷新前未提交的真实题草稿。");
   const before = await page.evaluate(() => localStorage.getItem("ai-interview-prep-history-v1"));
   await page.reload(); await library(page);
-  await page.getByRole("button", { name: "再次练习这道题", exact: true }).click();
+  await practiceRecordedQuestion(page);
   const dialog = page.getByRole("dialog", { name: "开始新一轮训练" });
   await expect(dialog).toBeVisible();
   await dialog.getByRole("button", { name: "继续当前训练", exact: true }).click();
@@ -165,7 +165,9 @@ test("刷新后仍有同题未完成独立训练时先确认，可继续旧会�
   expect(await page.evaluate(() => localStorage.getItem("ai-interview-prep-history-v1"))).toBe(before);
 });
 
-for (const kind of ["archive", "project", "independent"] as const) test(`真实题${kind}写入失败不假启动，原岗位/原答/最终版/草稿仍在`, async ({ page }) => {
+// 单题练习已改为独立会话（C1）：不再写岗位会话，因此不再存在“写岗位失败”的分支；
+// 岗位会话写入失败仍由岗位训练与推荐题路径覆盖（c2b-recommendation）。
+for (const kind of ["archive", "independent"] as const) test(`真实题${kind}写入失败不假启动，原岗位/原答/最终版/草稿仍在`, async ({ page }) => {
   const a = job("匿名岗位A", true); await seedJobs(page, [a]);
   await page.route("**/api/health", route => route.fulfill({ json: { modelConfigured: false } }));
   await page.goto("/"); await page.getByRole("button", { name: "查看岗位", exact: true }).click(); await library(page);
@@ -173,18 +175,19 @@ for (const kind of ["archive", "project", "independent"] as const) test(`真实�
   await page.getByRole("textbox", { name: "真实面试问题", exact: true }).fill(question);
   if (kind !== "independent") await page.getByRole("combobox", { name: "关联岗位（可选）", exact: true }).selectOption(a.id);
   await page.evaluate(kind => { const original = Storage.prototype.setItem; Storage.prototype.setItem = function(key, value) {
-    const fail = kind === "project" ? key === "ai-interview-projects-v1" : key === "ai-interview-prep-history-v1" && (kind === "archive" || JSON.parse(value).some((session: any) => session.preparation.questions[0]?.sourceType === "user_recorded"));
+    const fail = key === "ai-interview-prep-history-v1" && (kind === "archive" || JSON.parse(value).some((session: any) => session.preparation.questions[0]?.sourceType === "user_recorded"));
     if (fail) throw new DOMException("匿名启动写入失败", "QuotaExceededError"); original.call(this, key, value);
   }; }, kind);
   await page.getByRole("button", { name: "保存并练习", exact: true }).click();
-  await page.getByRole("dialog", { name: "开始新一轮训练" }).getByRole("button", { name: "保存旧轮次并开始", exact: true }).click();
+  await page.getByRole("dialog", { name: "开始新一轮训练" }).getByRole("button", { name: "暂存并开始新练习", exact: true }).click();
   await expect(page.getByRole("alert").filter({ hasText: "匿名启动写入失败" })).toBeVisible();
   await expect(page.getByRole("textbox", { name: "本轮回答", exact: true })).toHaveCount(0);
   expect(await page.evaluate(() => localStorage.getItem("ai-interview-projects-v1"))).toBe(before.projects);
   const after = await page.evaluate(() => JSON.parse(localStorage.getItem("ai-interview-drafts-v1")!));
   for (const [key, value] of Object.entries(before.drafts)) if (key.startsWith("answer:")) expect(after[key]).toBe(value);
+  // 独立会话写入失败时不留下任何历史，也不会为了“假启动”去改动岗位会话。
   const history = await page.evaluate(() => JSON.parse(localStorage.getItem("ai-interview-prep-history-v1") || "[]"));
-  if (kind === "archive") expect(history).toEqual([]); else expect(history).toEqual([JSON.parse(before.projects!)[0].session]);
+  expect(history).toEqual([]);
 });
 
 test("两岗位无JD同一问句分别保存，确认新轮次归档旧回答且A/B会话不串联", async ({ page }, info) => {
@@ -193,7 +196,7 @@ test("两岗位无JD同一问句分别保存，确认新轮次归档旧回答且
     await page.getByRole("textbox", { name: "真实面试问题", exact: true }).fill(question);
     await page.getByRole("combobox", { name: "关联岗位（可选）", exact: true }).selectOption(item.id);
     await page.getByRole("button", { name: "保存并练习", exact: true }).click();
-    await page.getByRole("dialog", { name: "开始新一轮训练" }).getByRole("button", { name: "保存旧轮次并开始", exact: true }).click();
+    await page.getByRole("dialog", { name: "开始新一轮训练" }).getByRole("button", { name: "暂存并开始新练习", exact: true }).click();
     await expect(page.getByRole("heading", { name: question, exact: true })).toBeVisible();
     await page.getByRole("textbox", { name: "本轮回答", exact: true }).fill(`${item.id}新回答草稿`);
     await library(page);
@@ -201,12 +204,19 @@ test("两岗位无JD同一问句分别保存，确认新轮次归档旧回答且
   const saved = await page.evaluate(() => ({ jobs: JSON.parse(localStorage.getItem("ai-interview-projects-v1")!), history: JSON.parse(localStorage.getItem("ai-interview-prep-history-v1")!), library: JSON.parse(localStorage.getItem("ai-interview-question-library-v1")!), drafts: JSON.parse(localStorage.getItem("ai-interview-drafts-v1")!) }));
   const qa = saved.library.recordedQuestions.find((item: any) => item.projectId === a.id), qb = saved.library.recordedQuestions.find((item: any) => item.projectId === b.id);
   expect(qa.id).not.toBe(qb.id);
-  expect(saved.jobs.find((item: any) => item.id === a.id).session.preparation.questions[0].id).toBe(qa.id);
-  expect(saved.jobs.find((item: any) => item.id === b.id).session.preparation.questions[0].id).toBe(qb.id);
-  for (const item of [a, b]) expect(saved.history.find((session: any) => session.id === item.session!.id)).toEqual(JSON.parse(JSON.stringify(item.session)));
+  // C1：单题练习不覆盖岗位会话与题目列表，原岗位训练原样保留。
+  for (const item of [a, b]) expect(saved.jobs.find((job: any) => job.id === item.id).session).toEqual(JSON.parse(JSON.stringify(item.session)));
+  // 两题各自产生独立训练记录，并保留结构化岗位归属，不串到对方岗位。
+  const practiceOf = (questionId: string) => saved.history.find((session: any) => session.preparation.questions[0]?.id === questionId);
+  expect(saved.history).toHaveLength(2);
+  for (const [item, question] of [[a, qa], [b, qb]] as const) {
+    const record = practiceOf(question.id);
+    expect(record.preparation.job.projectId).toBe(item.id);
+    expect(record.preparation.job.projectName).toBe(item.id);
+  }
   for (const item of [a, b]) expect(Object.values(saved.drafts)).toContain(`${item.id}新回答草稿`);
-  await page.getByRole("combobox", { name: "按岗位筛选", exact: true }).selectOption(b.id);
-  await page.getByRole("button", { name: "再次练习这道题", exact: true }).click();
+  await pickSelectOption(page, "按岗位筛选", b.id);
+  await practiceRecordedQuestion(page);
   await page.getByRole("dialog", { name: "开始新一轮训练" }).getByRole("button", { name: "保留当前训练", exact: true }).click();
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem("ai-interview-projects-v1")!))).toEqual(saved.jobs);
   await page.screenshot({ path: info.outputPath("recorded-two-jobs.png"), fullPage: true });
@@ -237,7 +247,7 @@ test("真实题等待点评锁定导航，取消保留原答；未确认最终�
     await page.getByRole("textbox", { name: "最终确认答案", exact: true }).fill(final);
     await library(page);
     await page.getByRole("button", { name: "整理训练记录", exact: true }).click();
-    await page.getByRole("button", { name: "查看", exact: true }).click();
+    await page.getByRole("button", { name: "查看复盘", exact: true }).click();
   await openDetails(page, "保存我的回答思路");
     await expect(page.getByRole("textbox", { name: "最终确认答案", exact: true })).toHaveValue(final);
     expect(await page.evaluate(() => JSON.parse(localStorage.getItem("ai-interview-prep-history-v1")!)[0].turns[0].finalAnswer)).toBeUndefined();

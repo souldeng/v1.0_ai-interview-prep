@@ -7,6 +7,7 @@ export const LLM_FEATURES = [
   "resume_extraction",
   "experience_extraction",
   "experience_question_generation",
+  "resume_question_generation",
   "material_organization",
   "material_summary",
   "job_analysis",
@@ -191,17 +192,25 @@ export function extractTokenUsage(usage: unknown): TokenUsage {
   const outputTokens = safeInteger(value.completion_tokens ?? value.output_tokens);
   const reportedTotal = safeInteger(value.total_tokens);
   const promptDetails = value.prompt_tokens_details && typeof value.prompt_tokens_details === "object" ? value.prompt_tokens_details as Record<string, unknown> : {};
-  const reportedCacheHit = safeInteger(promptDetails.cached_tokens ?? value.prompt_cache_hit_tokens);
+  const inputDetails = value.input_tokens_details && typeof value.input_tokens_details === "object" ? value.input_tokens_details as Record<string, unknown> : {};
+  const detailHit = safeInteger(promptDetails.cached_tokens ?? inputDetails.cached_tokens);
+  const directHit = safeInteger(value.prompt_cache_hit_tokens);
+  const reportedCacheHit = directHit ?? detailHit;
   const reportedCacheMiss = safeInteger(value.prompt_cache_miss_tokens);
-  const cacheHitTokens = reportedCacheHit ?? (inputTokens !== null && reportedCacheMiss !== null && reportedCacheMiss <= inputTokens ? inputTokens - reportedCacheMiss : null);
-  const cacheMissTokens = reportedCacheMiss ?? (inputTokens !== null && cacheHitTokens !== null && cacheHitTokens <= inputTokens ? inputTokens - cacheHitTokens : null);
+  let cacheHitTokens = reportedCacheHit ?? (inputTokens !== null && reportedCacheMiss !== null && reportedCacheMiss <= inputTokens ? inputTokens - reportedCacheMiss : null);
+  let cacheMissTokens = reportedCacheMiss ?? (inputTokens !== null && cacheHitTokens !== null && cacheHitTokens <= inputTokens ? inputTokens - cacheHitTokens : null);
+  if (directHit !== null && detailHit !== null && directHit !== detailHit || inputTokens !== null && (
+    cacheHitTokens !== null && cacheHitTokens > inputTokens || cacheMissTokens !== null && cacheMissTokens > inputTokens ||
+    cacheHitTokens !== null && cacheMissTokens !== null && cacheHitTokens + cacheMissTokens !== inputTokens)) {
+    cacheHitTokens = null; cacheMissTokens = null;
+  }
   const outputDetails = value.completion_tokens_details ?? value.output_tokens_details;
   const reportedReasoning = safeInteger(outputDetails && typeof outputDetails === "object" ? (outputDetails as Record<string, unknown>).reasoning_tokens : value.reasoning_tokens);
   const reasoningTokens = reportedReasoning !== null && outputTokens !== null && reportedReasoning <= outputTokens ? reportedReasoning : null;
   return {
     inputTokens,
     outputTokens,
-    totalTokens: reportedTotal ?? (inputTokens !== null && outputTokens !== null ? inputTokens + outputTokens : null),
+    totalTokens: inputTokens !== null && outputTokens !== null && reportedTotal !== null && reportedTotal !== inputTokens + outputTokens ? null : reportedTotal ?? (inputTokens !== null && outputTokens !== null ? inputTokens + outputTokens : null),
     cacheHitTokens,
     cacheMissTokens,
     reasoningTokens,
@@ -350,7 +359,7 @@ export async function settleUsage(reservation: UsageReservation, input: { status
   event.estimatedCostCny = event.billing.estimatedCostCny;
   event.pricingBasis = event.billing.rates.map(rate => rate.basis).join("; ") || null;
   event.reservedCostCny = event.estimatedCostCny === null ? event.billing.maxCostCny ?? reservation.reservedCostCny : null;
-  event.errorCode = input.errorCode ? (/^upstream_http_\d{3}$/.test(input.errorCode) || ["timeout", "client_cancelled", "connection_error", "invalid_response", "invalid_response_json", "stream_missing_body"].includes(input.errorCode) ? input.errorCode : "unknown_error") : null;
+  event.errorCode = input.errorCode ? (/^upstream_http_\d{3}$/.test(input.errorCode) || ["timeout", "client_cancelled", "connection_error", "invalid_response", "invalid_response_json", "stream_missing_body", "output_invalid_json"].includes(input.errorCode) ? input.errorCode : "unknown_error") : null;
   if (input.diagnostics) event.diagnostics = diagnosticMetadata(input.diagnostics);
   return withLedgerLock(async () => {
     try { await appendEvent(config.logPath, event); return true; } catch { return false; }
@@ -540,7 +549,8 @@ export class SseUsageCollector {
   private firstToken: number | null = null;
 
   push(chunk: string, elapsedMs?: number): void {
-    this.buffer += chunk.replace(/\r\n/g, "\n");
+    // Normalize after joining: a CR and LF may arrive in different network chunks.
+    this.buffer = (this.buffer + chunk).replace(/\r\n/g, "\n");
     while (true) {
       const separator = this.buffer.indexOf("\n\n");
       if (separator < 0) return;
@@ -554,7 +564,10 @@ export class SseUsageCollector {
         if (this.firstToken === null && safeInteger(elapsedMs) !== null && [delta?.content, delta?.reasoning_content].some(value => typeof value === "string" && value.length > 0)) this.firstToken = elapsedMs!;
         const reason = payload.choices?.[0]?.finish_reason;
         if (typeof reason === "string" && ["stop", "length", "tool_calls", "content_filter"].includes(reason)) this.finish = reason;
-        if (payload.usage) this.latest = extractTokenUsage(payload.usage);
+        if (payload.usage) {
+          const usage = extractTokenUsage(payload.usage);
+          if (Object.values(usage).some(value => value !== null)) this.latest = usage;
+        }
       } catch { /* Incomplete or non-JSON event: leave token accounting unchanged. */ }
     }
   }

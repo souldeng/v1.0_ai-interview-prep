@@ -79,3 +79,25 @@ test("两个失败项可分别重试，不重新调用已成功资料或未选�
   const result=await organizeCollectionMaterials(materials,{cached:validateMaterialExtractions([materials[0]],[item(materials[0].id)]),retryIds:[materials[1].id],previousFailures:[{materialId:materials[2].id,stage:"extraction",message:"丙：证据待检查"}]});
   assert.deepEqual(sent,[[materials[1].id]]);assert.equal(result.items.length,2);assert.equal(result.failures?.[0].message,"丙：证据待检查");
 });
+test("同一连续资料的完全重复截图只发送一次，但两份原始来源都保留",async(t)=>{
+  const first={...createCollectedMaterial("JD-1.png","岗位要求：理解检索。"),source:"screenshot" as const,groupId:"same-jd",groupOrder:0};
+  const duplicate={...createCollectedMaterial("JD-2.png","岗位要求：理解检索。"),source:"screenshot" as const,groupId:"same-jd",groupOrder:1};
+  const sent:any[]=[];
+  t.mock.method(globalThis,"fetch",async(_url:any,options:RequestInit)=>{
+    const request=JSON.parse(String(options.body));sent.push(request);
+    const data=JSON.parse(request.messages[1].content);
+    if(request.feature==="material_organization") return new Response(JSON.stringify({content:JSON.stringify({materials:data.materials.map((m:any)=>({materialId:m.id,type:"job_description",jobTitle:"",duties:[],requirements:["理解检索"],skills:[],knowledgePoints:[],questions:[]}))})}));
+    return new Response(JSON.stringify({content:JSON.stringify({commonRequirements:[],topics:[],priorities:[]})}));
+  });
+  const result=await organizeCollectionMaterials([first,duplicate]);
+  const organization=sent.find(request=>request.feature==="material_organization");
+  const payload=JSON.parse(organization.messages[1].content);
+  assert.equal(payload.materials.length,1);
+  assert.equal(result.items.length,2);
+  assert.deepEqual(new Set(result.items.map(item=>item.materialId)),new Set([first.id,duplicate.id]));
+  assert.ok(JSON.stringify(sent).includes("sourceGroups"));
+  const retry=await organizeCollectionMaterials([first,duplicate],{retryIds:[duplicate.id]});
+  const retryOrganization=sent.filter(request=>request.feature==="material_organization").at(-1)!;
+  assert.deepEqual(JSON.parse(retryOrganization.messages[1].content).materials.map((item:any)=>item.id),[first.id]);
+  assert.equal(retry.items.length,2);
+});

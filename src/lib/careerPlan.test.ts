@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { buildEvidenceTasks, createEvidencePreparation, evidenceQuestions, getSprintTasks, isEvidenceReady, renderPreparationBrief } from "./careerPlan";
-import { createPreparation, finishSession, nextTurn, startSession } from "./interview";
+import { completeSession, createPreparation, finishSession, nextTurn, startSession } from "./interview";
 import { createInterviewProject, toProjectQuestion, updateProjectFromSession } from "./projects";
 
 const input = { company: "测试公司", jobTitle: "AI 产品经理", jobDescription: "负责需求调研；理解 RAG 与大模型；负责模型评测与指标；推进 POC 交付；协作研发团队。", candidateBackground: "我负责客户需求调研，完成访谈纪要。熟悉 RAG。", concerns: "担心没有正式产品经理经历。" };
@@ -39,7 +39,8 @@ test("单卡三题专项可完成复盘，进度不会把追问重复计数", ()
   session = nextTurn(session, "我暂时没有这项经历。", { action: "follow_up", followUpQuestion: "准备怎么补足？" });
   project = updateProjectFromSession(project, session);
   assert.equal(project.completedQuestions, 1);
-  while (session.status === "active") session = nextTurn(session, "我完成了访谈纪要，尚未负责研发，接下来会如实补足产品分析实践。", { action: "next" });
+  while (!session.readyToComplete) session = nextTurn(session, "我完成了访谈纪要，尚未负责研发，接下来会如实补足产品分析实践。", { action: "next" });
+  session = completeSession(session);
   project = updateProjectFromSession(project, session);
   assert.equal(project.completedQuestions, 3);
   assert.equal(project.totalQuestions, 3);

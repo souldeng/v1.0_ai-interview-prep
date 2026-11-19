@@ -7,6 +7,7 @@ export function questionSourceLabel(question: { sourceType?: string; source?: st
     case "ai_follow_up": return "AI 追问";
     case "analysis_recommendation": return "AI 分析推荐";
     case "user_recorded": return "本人记录的真实面试问题";
+    case "ai_prediction": return "AI 预测题";
     case "experience_practice": return "AI 经历专项题";
     case "material_derived": return "AI 资料衍生题";
     case "resume":

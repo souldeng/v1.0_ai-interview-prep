@@ -135,11 +135,11 @@ test("C1 未提交首答也须明确确认新轮次，取消不变，确认后�
   await expect(page.getByRole("textbox", { name: "本轮回答", exact: true })).toHaveValue("尚未提交的真实思路草稿：本人访谈与需求清单。");
   expect(await page.evaluate(() => ({ projects: localStorage.getItem("ai-interview-projects-v1"), drafts: localStorage.getItem("ai-interview-drafts-v1") }))).toEqual(before);
   await page.getByRole("button", { name: "开始新一轮训练", exact: true }).click();
-  await dialog.getByRole("button", { name: "保存旧轮次并开始", exact: true }).click();
+  await dialog.getByRole("button", { name: "暂存并开始新练习", exact: true }).click();
   await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("ai-interview-projects-v1")!)[0].session.id)).not.toBe(item.session.id);
   expect(await page.evaluate(() => localStorage.getItem("ai-interview-drafts-v1"))).toBe(before.drafts);
   await primary(page, "AI 面试题库"); await page.getByRole("button", { name: "整理训练记录", exact: true }).click();
-  await page.getByRole("button", { name: "查看", exact: true }).click();
+  await page.getByRole("button", { name: "查看复盘", exact: true }).click();
   await expect(page.getByRole("textbox", { name: "本轮回答", exact: true })).toHaveValue("尚未提交的真实思路草稿：本人访谈与需求清单。");
 });
 
@@ -202,7 +202,7 @@ test("C1 完成会话的新训练保持事实隔离，选题及保存失败不�
     Storage.prototype.setItem = function(key, value) { if (key === "ai-interview-projects-v1") throw new Error("匿名项目保存失败"); return (window as any).c1NativeSetItem.call(this, key, value); };
   });
   await page.getByRole("button", { name: "开始新一轮训练", exact: true }).click();
-  await page.getByRole("button", { name: "保存旧轮次并开始", exact: true }).click();
+  await page.getByRole("button", { name: "暂存并开始新练习", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("匿名项目保存失败");
   expect(await page.evaluate(() => localStorage.getItem("ai-interview-projects-v1"))).toBe(before);
   await openDetails(page, "保存我的回答思路");
@@ -214,7 +214,7 @@ test("C1 完成会话的新训练保持事实隔离，选题及保存失败不�
   await page.evaluate(() => { Storage.prototype.setItem = (window as any).c1NativeSetItem; });
   // Local fallback is explicit on a successful save; it is never described as AI selection success.
   await page.getByRole("button", { name: "开始新一轮训练", exact: true }).click();
-  await page.getByRole("button", { name: "保存旧轮次并开始", exact: true }).click();
+  await page.getByRole("button", { name: "暂存并开始新练习", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("模型选题失败或超时，已使用本地选题");
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem("ai-interview-prep-history-v1")!).find((s: any) => s.id === JSON.parse(localStorage.getItem("ai-interview-projects-v1")!)[0].session.id))).toBeUndefined();
   const archived = await page.evaluate(id => JSON.parse(localStorage.getItem("ai-interview-prep-history-v1")!).find((s: any) => s.id === id), item.session!.id);
@@ -222,7 +222,7 @@ test("C1 完成会话的新训练保持事实隔离，选题及保存失败不�
   // Exercise the same public selection boundary with a valid network response.
   failModel = false;
   await page.getByRole("button", { name: "开始新一轮训练", exact: true }).click();
-  await page.getByRole("button", { name: "保存旧轮次并开始", exact: true }).click();
+  await page.getByRole("button", { name: "暂存并开始新练习", exact: true }).click();
   await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("ai-interview-projects-v1")!)[0].session.questions.length)).toBe(3);
   expect(await page.evaluate(key => JSON.parse(localStorage.getItem(key)!), PROFILE_KEY)).toEqual(profile);
 });

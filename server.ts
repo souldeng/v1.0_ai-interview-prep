@@ -1,9 +1,10 @@
 import cors from "cors";
+import { modelRequestPolicy } from "./src/services/modelRequestPolicy";
 import "dotenv/config";
 import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
-import { LLM_FEATURES, SseUsageCollector, calculateBilling, extractTokenUsage, loadMonitoringConfig, reserveUsage, settleUsage, type LlmFeature, type TokenUsage, type UsageDiagnostics, type RequestAccountingOptions } from "./src/services/llmUsage";
+import { LLM_FEATURES, SseUsageCollector, calculateBilling, extractTokenUsage, loadMonitoringConfig, reserveUsage, settleUsage, type LlmFeature, type TokenUsage, type UsageDiagnostics } from "./src/services/llmUsage";
 
 type ChatRequest = { messages?: Array<{ role: string; content: string }>; task?: "coach" | "interviewer"; feature?: LlmFeature; stream?: boolean };
 type ModelConfig = { provider: string; apiKey: string; baseUrl: string; model: string };
@@ -72,15 +73,11 @@ async function startServer() {
     if (!body.messages.every(message => message && typeof message.role === "string" && typeof message.content === "string")) return res.status(400).json({ error: "messages 必须包含文本 role 和 content。" });
     const feature = featureOf(body.feature);
     const monitoring = loadMonitoringConfig();
-    const experienceQuestions = feature === "experience_question_generation";
-    const deepseekQuestions = experienceQuestions && config.provider.toLowerCase() === "deepseek" && config.model === "deepseek-flash";
-    const materialTask = feature === "material_organization" || feature === "material_summary";
-    const deepseekMaterial = materialTask && config.provider.toLowerCase() === "deepseek" && config.model === "deepseek-flash";
+    const policy = modelRequestPolicy(config.provider, config.model, feature, monitoring.maxOutputTokens);
     const upstreamRequest = { model: config.model, messages: body.messages, temperature: 0.2,
-      max_tokens: experienceQuestions ? Math.min(monitoring.maxOutputTokens, 2048) : materialTask ? Math.min(monitoring.maxOutputTokens, 6144) : monitoring.maxOutputTokens,
-      ...(deepseekQuestions || deepseekMaterial ? { thinking: { type: "disabled" }, response_format: { type: "json_object" } } : {}),
+      ...policy.parameters,
       ...(body.stream ? { stream: true, stream_options: { include_usage: true } } : {}) };
-    const requestOptions: RequestAccountingOptions = { maxOutputTokens: upstreamRequest.max_tokens, thinkingMode: deepseekQuestions || deepseekMaterial ? "disabled" : "provider_default", reasoningEffort: "not_set", jsonMode: deepseekQuestions || deepseekMaterial };
+    const requestOptions = policy.accounting;
     const reserved = await reserveUsage({ feature, provider: config.provider, model: config.model, messages: body.messages, requestOptions });
     if (reserved.accepted === false) return res.status(429).json({ error: budgetMessage(reserved.reason), code: "llm_budget_blocked", reason: reserved.reason, requestId: reserved.requestId });
     const controller = new AbortController();
@@ -169,9 +166,14 @@ async function startServer() {
       if (typeof content !== "string") { diagnostics.phase = "response_structure"; await settle("failed", usage, "invalid_response"); return res.status(502).json({ error: "模型服务返回格式无效" }); }
       try { JSON.parse(content.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim()); diagnostics.contentJsonValid = true; }
       catch { diagnostics.contentJsonValid = false; }
-      diagnostics.phase = diagnostics.finishReason === "length" ? "output_truncated" : diagnostics.contentJsonValid ? "completed" : "content_json";
       const completedAt = new Date().toISOString();
       metrics.estimatedCostCny = calculateBilling(config.provider, config.model, reserved.reservation.startedAt, completedAt, usage, monitoring).estimatedCostCny;
+      if (!diagnostics.contentJsonValid) {
+        diagnostics.phase = diagnostics.finishReason === "length" ? "output_truncated" : "content_json";
+        await settle("failed", usage, "output_invalid_json", completedAt);
+        return res.status(422).json({ error: diagnostics.finishReason === "length" ? "模型输出达到上限并可能截断，未使用本次结果；请稍后重试。" : "模型返回的内容不是完整 JSON，未使用本次结果；请稍后重试。", code: "llm_invalid_json" });
+      }
+      diagnostics.phase = "completed";
       const monitoringSaved = await settle("succeeded", usage, undefined, completedAt);
       return res.json({ content, metrics: { ...metrics, monitoringSaved } });
     } catch {

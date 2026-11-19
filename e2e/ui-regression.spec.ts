@@ -26,9 +26,10 @@ async function auditA11y(page: Page, testInfo: TestInfo, name: string) {
 }
 
 async function openPrimaryPage(page: Page, name: string) {
+  const navigationName = name === "我的岗位" ? "准备" : name === "个人资料" ? "简历与经历" : name === "AI 面试题库" ? "题库" : name;
   const menu = page.getByRole("button", { name: "打开导航" });
   if (await menu.isVisible()) await menu.click();
-  await page.getByRole("button", { name: new RegExp(name) }).first().click();
+  await page.getByRole("button", { name: new RegExp(navigationName) }).first().click();
   if (name === "AI 面试题库") await libraryArea(page, "job");
 }
 
@@ -55,14 +56,14 @@ test.describe("浅色工作台 UI 回归", () => {
     page.on("console", message => { if (message.type() === "error") consoleErrors.push(message.text()); });
     page.on("pageerror", error => consoleErrors.push(error.message));
     await page.goto("/");
-    await expect(page.getByRole("heading", { name: "我的岗位" })).toBeVisible();
-    for (const name of ["我的岗位", "个人资料", "AI 面试题库"]) {
+    await expect(page.getByRole("heading", { name: "工作台" })).toBeVisible();
+    for (const [name, heading] of [["准备", "准备"], ["简历与经历", "个人资料库"], ["题库", "AI 面试题库"]]) {
       await openPrimaryPage(page, name);
-      await expect(page.locator("h1", { hasText: name })).toBeVisible();
+      await expect(page.getByRole("heading", { name: heading, exact: true })).toBeVisible();
       await expectNoPageOverflow(page);
     }
-    await page.getByRole("button", { name: "设置" }).click();
-    await expect(page.getByRole("alert")).toContainText("设置将在后续阶段完善");
+    await page.getByRole("button", { name: "备份与训练记录" }).click();
+    await expect(page.getByRole("heading", { name: "训练记录", exact: true })).toBeVisible();
     await capture(page, testInfo, "primary-navigation");
     await auditA11y(page, testInfo, "primary-navigation");
     expect(consoleErrors).toEqual([]);
@@ -130,7 +131,7 @@ test.describe("浅色工作台 UI 回归", () => {
     await page.getByRole("button", { name: "返回岗位列表" }).click();
     await page.getByRole("button", { name: "删除项目" }).click();
     await page.getByRole("button", { name: "确认删除该项目" }).click();
-    await expect(page.getByRole("heading", { name: "还没有岗位项目" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "还没有岗位资料" })).toBeVisible();
     await expect(page.getByRole("alert")).toContainText("已删除选定项目");
     await capture(page, testInfo, "delete-project-confirmed");
     await expectNoPageOverflow(page);
@@ -140,7 +141,8 @@ test.describe("浅色工作台 UI 回归", () => {
     await page.goto("/");
     await createAnonymousProject(page);
     await openPrimaryPage(page, "AI 面试题库");
-    await expect(page.getByRole("heading", { name: "AI 面试题库" })).toBeVisible();
+    // 题库页大标题已按用户决策移除：以题库分类入口为页面标识。
+    await expect(page.getByRole("button", { name: "手动题目与预测题", exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: /匿名 UI 巡检岗位/ }).first()).toBeVisible();
     await expectNoPageOverflow(page);
     await capture(page, testInfo, "question-library");

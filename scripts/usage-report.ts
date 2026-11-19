@@ -14,8 +14,9 @@ function cacheMetrics(report: UsageReport, indent = "") {
 function printScope(label: string, report: UsageReport) {
   console.log(`\n${label}`);
   console.log(`请求 ${report.requests}（代理成功 ${report.succeeded} / 失败 ${report.failed} / 取消 ${report.cancelled} / 超时 ${report.timedOut} / 等待结算 ${report.pendingRequests} / 预算拦截 ${report.blocked}）；失败率 ${percent(report.failureRate)}`);
-  console.log(`已返回usage：输入 ${report.inputTokens} / 输出 ${report.outputTokens} / 总计 ${report.totalTokens} Token（完整用量 ${report.knownTokenRequests}，用量未知 ${report.unknownUsageRequests}）`);
-  console.log(`真实usage费用估算 ${cny(report.knownCostCny)}；日志原记估算 ${cny(report.recordedKnownCostCny)}；只读复算 ${report.recalculatedRequests} 条`);
+  console.log(`已返回usage：输入 ${report.knownTokenRequests ? report.inputTokens : "未知"} / 输出 ${report.knownTokenRequests ? report.outputTokens : "未知"} / 总计 ${report.knownTokenRequests ? report.totalTokens : "未知"} Token（完整用量 ${report.knownTokenRequests}，用量未知 ${report.unknownUsageRequests}）`);
+  const priced = report.details.some(event => event.status !== "blocked" && event.estimatedCostCny !== null);
+  console.log(`真实usage费用估算 ${priced ? cny(report.knownCostCny) : "未知"}；日志原记估算 ${report.details.some(event => event.recordedEstimatedCostCny !== null) ? cny(report.recordedKnownCostCny) : "未知"}；只读复算 ${report.recalculatedRequests} 条`);
   console.log(`未结算/未释放预算预留 ${cny(report.reservedUnknownCostCny)}（在途 ${cny(report.inFlightReservedCostCny)}，结束后仍待核对 ${cny(report.unsettledReservedCostCny)}）；预留不是实际花费`);
   console.log(`时段费用：高峰 ${cny(report.costByPeriod.peak)} / 空闲 ${cny(report.costByPeriod.off_peak)} / 自定义 ${cny(report.costByPeriod.custom)} / 依据未知 ${cny(report.costByPeriod.unknown)}`);
   if (report.ambiguousCostRequests) console.log(`另有 ${report.ambiguousCostRequests} 条费用仅可给范围 ${cny(report.ambiguousCostMinCny)}–${cny(report.ambiguousCostMaxCny)}（跨时段/日历或缓存拆分不足，未伪造Token分摊；未纳入上方点估算）`);

@@ -77,13 +77,13 @@ test("题库首次只展示三个用途入口，进入后才显示该区操作",
   await page.goto("/"); await primary(page, "AI 面试题库");
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.screenshot({ path: info.outputPath("library-entry.png"), fullPage: true });
-  for (const name of ["AI 基础学习", "岗位专项训练", "真实面试题复练"]) await expect(page.getByRole("button", { name, exact: true })).toBeVisible();
+  for (const name of ["AI 基础学习", "岗位专项训练", "手动题目与预测题"]) await expect(page.getByRole("button", { name, exact: true })).toBeVisible();
   await expect(page.getByRole("textbox")).toHaveCount(0);
   await page.getByRole("button", { name: "AI 基础学习", exact: true }).click();
   await expect(page.getByRole("textbox", { name: "搜索内置题" })).toBeVisible();
   await expect(page.getByRole("textbox", { name: "真实面试问题" })).toHaveCount(0);
   await page.getByRole("button", { name: "返回题库入口", exact: true }).click();
-  await page.getByRole("button", { name: "真实面试题复练", exact: true }).click();
+  await page.getByRole("button", { name: "手动题目与预测题", exact: true }).click();
   await expect(page.getByRole("textbox", { name: "真实面试问题" })).toBeVisible();
   await expect(page.getByRole("textbox", { name: "搜索内置题" })).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);

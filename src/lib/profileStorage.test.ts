@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { emptyUserProfile, loadUserProfile, materialFileIsShared, PROFILE_KEY, saveUserProfile, withoutExperienceCard, withoutResumeMaterial } from "./profileStorage";
+import { addExperienceCandidates, emptyUserProfile, isExperienceCandidateCurrent, loadUserProfile, materialFileIsShared, PROFILE_KEY, resumeMaterialVersion, saveUserProfile, withoutExperienceCard, withoutResumeMaterial } from "./profileStorage";
 import { buildInterviewContext } from "./interviewContext";
 import type { InterviewProject } from "./domain";
 import type { StorageLike } from "./projectStorage";
@@ -85,4 +85,31 @@ test("删除经历的持久化失败，不覆盖已保存事实和资料", () =>
   saveUserProfile(profile, storage); const before = storage.getItem(PROFILE_KEY);
   assert.throws(() => saveUserProfile(withoutExperienceCard(profile, "retain"), { ...storage, setItem: () => { throw new Error("匿名写入失败"); } }), /匿名写入失败/);
   assert.equal(storage.getItem(PROFILE_KEY), before); assert.equal(loadUserProfile(storage).experiences[0].confirmed, true);
+});
+
+test("AI 候选经历持久化后可恢复、可编辑，且不会自动成为已确认个人事实", () => {
+  const storage = memory(); const profile = emptyUserProfile(new Date("2026-11-07T00:00:00Z"));
+  const material = { id: "resume-a", fileName: "resume.txt", mimeType: "text/plain", size: 20, extractedText: "本人整理需求并保留对照记录", parser: "plain-text" as const, reviewedAt: profile.updatedAt, createdAt: profile.updatedAt };
+  profile.resumes = [material];
+  const candidate = { id: "candidate-a", title: "需求整理", situation: "", action: "本人整理需求", result: "保留对照记录", reflection: "", sourceQuotes: [{ materialId: material.id, quote: "本人整理需求" }], sourceVersions: [{ materialId: material.id, contentVersion: resumeMaterialVersion(material) }], createdAt: profile.updatedAt, updatedAt: profile.updatedAt };
+  const persisted = addExperienceCandidates(profile, [candidate]);
+  saveUserProfile(persisted, storage);
+  const restored = loadUserProfile(storage);
+  assert.equal(restored.experienceCandidates?.[0].title, "需求整理");
+  assert.equal(isExperienceCandidateCurrent(restored, restored.experienceCandidates![0]), true);
+  assert.deepEqual(buildInterviewContext({ profile: restored }).confirmedUserFacts, []);
+  saveUserProfile({ ...restored, experienceCandidates: restored.experienceCandidates!.map(item => ({ ...item, title: "已编辑的需求整理", updatedAt: "2026-11-07T00:01:00Z" })) }, storage);
+  assert.equal(loadUserProfile(storage).experienceCandidates?.[0].title, "已编辑的需求整理");
+});
+
+test("候选经历按资料标识隔离，资料变化或删除不会让旧候选绕过核对", () => {
+  const profile = emptyUserProfile(new Date("2026-11-07T00:00:00Z"));
+  const source = { id: "resume-a", fileName: "a.txt", mimeType: "text/plain", size: 8, extractedText: "本人行动", parser: "plain-text" as const, reviewedAt: profile.updatedAt, createdAt: profile.updatedAt };
+  const other = { ...source, id: "resume-b", fileName: "b.txt", extractedText: "另一份资料" };
+  const candidate = { id: "candidate-a", title: "候选", situation: "", action: "本人行动", result: "", reflection: "", sourceQuotes: [{ materialId: source.id, quote: "本人行动" }], sourceVersions: [{ materialId: source.id, contentVersion: resumeMaterialVersion(source) }], createdAt: profile.updatedAt, updatedAt: profile.updatedAt };
+  const withCandidate = addExperienceCandidates({ ...profile, resumes: [source, other] }, [candidate]);
+  assert.equal(isExperienceCandidateCurrent(withCandidate, candidate), true);
+  const changed = { ...withCandidate, resumes: withCandidate.resumes.map(item => item.id === source.id ? { ...item, extractedText: "已修改的资料", reviewedAt: "2026-11-07T01:00:00Z" } : item) };
+  assert.equal(isExperienceCandidateCurrent(changed, candidate), false);
+  assert.throws(() => withoutResumeMaterial(withCandidate, source.id), /仍被候选经历引用/);
 });

@@ -1,72 +1,103 @@
-import { useState, type ReactNode } from "react";
-import { BrainCircuit, BriefcaseBusiness, LibraryBig, Menu, PanelLeftClose, PanelLeftOpen, Settings2, UserRound, X, type LucideIcon } from "lucide-react";
+import { useEffect, useState, type ReactNode } from "react";
+import { BookOpenText, BrainCircuit, ClipboardList, FileText, FolderOpenDot, LayoutDashboard, Menu, X, type LucideIcon } from "lucide-react";
 
-export type PrimaryPage = "jobs" | "profile" | "library";
+export type NavigationTarget = "dashboard" | "prepare" | "library" | "history" | "profile" | "materials" | "settings";
 
-const navigation: Array<{ id: PrimaryPage; label: string; description: string; icon: LucideIcon }> = [
-  { id: "jobs", label: "我的岗位", description: "岗位与训练", icon: BriefcaseBusiness },
-  { id: "profile", label: "个人资料", description: "简历与经历", icon: UserRound },
-  { id: "library", label: "AI 面试题库", description: "题目与答案", icon: LibraryBig },
+const primaryNavigation: Array<{ id: NavigationTarget; label: string; description: string; icon: LucideIcon }> = [
+  { id: "dashboard", label: "工作台", description: "今日任务", icon: LayoutDashboard },
+  { id: "prepare", label: "准备", description: "岗位 · 资料 · 题组", icon: FolderOpenDot },
+  { id: "library", label: "题库", description: "AI 面试题库", icon: BookOpenText },
+  { id: "history", label: "训练记录", description: "记录与复盘", icon: ClipboardList },
+];
+
+const materialNavigation: Array<{ id: "profile"; label: string; description: string; icon: LucideIcon }> = [
+  { id: "profile", label: "个人资料", description: "简历与经历", icon: FileText },
 ];
 
 interface AppShellProps {
-  activePage: PrimaryPage;
+  activeTarget: NavigationTarget;
   title: string;
   description: string;
   breadcrumbs?: string[];
   children: ReactNode;
+  hidePageHeader?: boolean;
   navigationDisabled?: boolean;
-  onNavigate: (page: PrimaryPage) => void;
-  onSettings: () => void;
+  activeJobLabel?: string | null;
+  /** Formal training keeps the same application state but removes global navigation. */
+  immersive?: boolean;
+  onNavigate: (target: NavigationTarget) => void;
+  onOpenBackup: () => void;
 }
 
-export function AppShell({ activePage, title, description, breadcrumbs = [], children, navigationDisabled = false, onNavigate, onSettings }: AppShellProps) {
+export function AppShell({ activeTarget, title, description, breadcrumbs = [], children, hidePageHeader = false, navigationDisabled = false, activeJobLabel, immersive = false, onNavigate, onOpenBackup }: AppShellProps) {
   const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false);
-  const [collapsed, setCollapsed] = useState(false);
-  const selectPage = (page: PrimaryPage) => {
+  useEffect(() => { setMobileNavigationOpen(false); }, [activeTarget]);
+  const selectTarget = (target: NavigationTarget) => {
     if (navigationDisabled) return;
-    onNavigate(page);
     setMobileNavigationOpen(false);
+    onNavigate(target);
   };
 
-  return <div className="min-h-screen bg-slate-50 text-slate-900">
-    {mobileNavigationOpen && <button aria-label="关闭导航遮罩" className="fixed inset-0 z-30 bg-slate-950/20 lg:hidden" onClick={() => setMobileNavigationOpen(false)} />}
-    <aside className={`fixed inset-y-0 left-0 z-40 flex w-72 flex-col border-r border-slate-200 bg-white px-3 py-4 shadow-xl transition-transform lg:translate-x-0 lg:shadow-none ${collapsed ? "lg:w-20" : "lg:w-64"} ${mobileNavigationOpen ? "translate-x-0" : "-translate-x-full"}`}>
-      <div className={`mb-7 flex items-center ${collapsed ? "justify-center" : "justify-between"}`}>
-        <button onClick={() => selectPage("jobs")} disabled={navigationDisabled} className="flex min-w-0 items-center gap-3 text-left disabled:cursor-not-allowed" aria-label="返回我的岗位">
-          <span className="rounded-xl bg-blue-700 p-2 text-white"><BrainCircuit size={20}/></span>
-          {!collapsed && <span className="min-w-0"><span className="block truncate font-semibold tracking-tight">AI 面试通</span><span className="mt-0.5 block text-xs text-slate-500">真实经历，轻量准备</span></span>}
+  const navButtonClass = (active: boolean) => `flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-[16px] transition-all outline-none focus-visible:ring-2 focus-visible:ring-ring/50 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 ${active
+    ? "bg-accent text-accent-foreground"
+    : "text-muted-foreground hover:bg-muted hover:text-foreground"}`;
+
+  if (immersive) return <div className="min-h-screen bg-background text-foreground"><main>{children}</main></div>;
+
+  return <div className="min-h-screen bg-background text-foreground">
+    {mobileNavigationOpen && <button aria-label="关闭导航遮罩" className="fixed inset-0 z-30 bg-foreground/20 lg:hidden" onClick={() => setMobileNavigationOpen(false)} />}
+    <aside className={`fixed inset-y-0 left-0 z-40 flex w-64 flex-col border-r border-border bg-card px-3 py-4 shadow-xl transition-transform lg:translate-x-0 lg:shadow-none ${mobileNavigationOpen ? "translate-x-0" : "-translate-x-full"}`}>
+      <div className="mb-7 flex items-center justify-between px-1">
+        <button onClick={() => selectTarget("dashboard")} disabled={navigationDisabled} className="flex min-w-0 items-center gap-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/50 disabled:cursor-not-allowed" aria-label="返回工作台">
+          <span className="rounded-[10px] bg-primary p-2 text-white"><BrainCircuit size={20}/></span>
+          <span className="min-w-0"><span className="block truncate text-[16px] font-semibold tracking-tight text-foreground">AI 面试通</span><span className="mt-0.5 block text-[13px] text-muted-foreground">真实经历，轻量准备</span></span>
         </button>
-        <button aria-label="折叠侧栏" className="hidden rounded-lg p-2 text-slate-500 hover:bg-slate-100 lg:block" onClick={() => setCollapsed(value => !value)}>{collapsed ? <PanelLeftOpen size={18}/> : <PanelLeftClose size={18}/>}</button>
-        <button aria-label="关闭导航" className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 lg:hidden" onClick={() => setMobileNavigationOpen(false)}><X size={18}/></button>
+        <button aria-label="关闭导航" className="rounded-md p-2 text-muted-foreground transition-all hover:bg-muted hover:text-foreground active:scale-[0.98] lg:hidden" onClick={() => setMobileNavigationOpen(false)}><X size={18}/></button>
       </div>
-      <nav aria-label="一级导航" className="space-y-1">
-        {navigation.map(item => {
+
+      <nav aria-label="主要导航" className="space-y-1">
+        {primaryNavigation.map(item => {
           const Icon = item.icon;
-          const active = activePage === item.id;
-          return <button key={item.id} title={collapsed ? item.label : undefined} aria-current={active ? "page" : undefined} disabled={navigationDisabled} onClick={() => selectPage(item.id)} className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm transition disabled:cursor-not-allowed disabled:opacity-50 ${active ? "bg-blue-50 text-blue-800" : "text-slate-600 hover:bg-slate-50 hover:text-slate-950"}`}>
-            <Icon size={19} className={active ? "text-blue-700" : "text-slate-400"}/>
-            {!collapsed && <span className="min-w-0"><span className="block font-medium">{item.label}</span><span className="mt-0.5 block truncate text-xs text-slate-600">{item.description}</span></span>}
+          const active = activeTarget === item.id;
+          return <button key={item.id} aria-current={active ? "page" : undefined} disabled={navigationDisabled} onClick={() => selectTarget(item.id)} className={navButtonClass(active)}>
+            <Icon size={19} className={active ? "text-primary" : "text-muted-foreground"}/>
+            <span className="min-w-0"><span className="block font-medium">{item.label}</span><span className={`mt-0.5 block truncate text-[13px] ${active ? "text-primary" : "text-muted-foreground"}`}>{item.description}</span></span>
           </button>;
         })}
       </nav>
-      {!collapsed && <details className="mt-auto p-3 text-xs leading-5 text-slate-500"><summary className="cursor-pointer">数据与隐私</summary><p className="mt-2">资料保存在当前浏览器。数据备份不包含原始附件，请另外保存原文件。</p></details>}
+
+      <div className="mt-6 border-t border-border pt-5">
+        <p className="px-3 text-[12px] font-medium tracking-wide text-muted-foreground">资料</p>
+        <nav aria-label="资料导航" className="mt-2 space-y-1">
+          {materialNavigation.map(item => {
+            const Icon = item.icon;
+            const active = activeTarget === item.id;
+            return <button key={item.id} aria-current={active ? "page" : undefined} disabled={navigationDisabled} onClick={() => selectTarget(item.id)} className={navButtonClass(active)}>
+              <Icon size={18} className={active ? "text-primary" : "text-muted-foreground"}/><span className="min-w-0"><span className="block font-medium">{item.label}</span><span className={`mt-0.5 block truncate text-[13px] ${active ? "text-primary" : "text-muted-foreground"}`}>{item.description}</span></span>
+            </button>;
+          })}
+        </nav>
+      </div>
+
+      <div className="mt-auto space-y-3 px-1 pt-6">
+        {activeJobLabel && <button disabled={navigationDisabled} onClick={() => selectTarget("prepare")} className="w-full rounded-lg border border-border bg-card px-3 py-2.5 text-left transition-all outline-none hover:border-[#94A3B8] hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/50 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"><span className="block text-[12px] text-muted-foreground">当前岗位</span><span className="mt-1 block truncate text-[13px] font-medium text-foreground">{activeJobLabel}</span></button>}
+        <button aria-current={activeTarget === "settings" ? "page" : undefined} onClick={() => { onOpenBackup(); setMobileNavigationOpen(false); }} disabled={navigationDisabled} className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-[13px] transition-all outline-none focus-visible:ring-2 focus-visible:ring-ring/50 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 ${activeTarget === "settings" ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}><ClipboardList size={16}/>设置与备份</button>
+        <p className="px-3 text-[12px] leading-5 text-muted-foreground">资料保存在当前浏览器；备份不含原始附件。</p>
+      </div>
     </aside>
-    <div className={`min-h-screen transition-[margin] ${collapsed ? "lg:ml-20" : "lg:ml-64"}`}>
-      <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/95 px-4 py-3 backdrop-blur sm:px-6">
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4">
-          <button aria-label="打开导航" className="rounded-lg p-2 text-slate-600 hover:bg-slate-100 lg:hidden" onClick={() => setMobileNavigationOpen(true)}><Menu size={20}/></button>
-          <div className="min-w-0 flex-1 lg:hidden"><p className="truncate text-sm font-semibold">AI 面试通</p><p className="truncate text-xs text-slate-500">个人求职与面试准备</p></div>
-          <p className="hidden text-sm text-slate-500 lg:block">把真实经历整理为可持续复用的面试准备材料</p>
-          <button aria-label="设置" onClick={onSettings} className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-600 hover:bg-slate-100 hover:text-slate-950"><Settings2 size={17}/><span className="hidden sm:inline">设置</span></button>
+
+    <div className="min-h-screen lg:ml-64">
+      <header className="sticky top-0 z-20 h-14 border-b border-border bg-background/95 px-4 backdrop-blur sm:px-6 lg:hidden">
+        <div className="mx-auto flex h-full max-w-[1120px] items-center gap-4">
+          <button aria-label="打开导航" className="rounded-md p-2 text-muted-foreground transition-all hover:bg-white hover:text-foreground active:scale-[0.98] lg:hidden" onClick={() => setMobileNavigationOpen(true)}><Menu size={20}/></button>
         </div>
       </header>
-      <main className="mx-auto w-full max-w-7xl px-4 py-7 sm:px-6 lg:px-8">
-        <div className="mb-7 border-b border-slate-200 pb-5">
-          {breadcrumbs.length > 0 && <p className="mb-2 text-sm text-slate-500">{breadcrumbs.join(" / ")}</p>}
-          <h1 className="text-2xl font-semibold tracking-tight text-slate-950 sm:text-3xl">{title}</h1>
-          {description && <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">{description}</p>}
-        </div>
+      <main className="mx-auto w-full max-w-[1120px] px-6 py-5 md:px-8 md:py-6">
+        {!hidePageHeader && <div className="mb-8">
+          {breadcrumbs.length > 0 && <p className="mb-2 text-[13px] text-muted-foreground">{breadcrumbs.join(" / ")}</p>}
+          {title ? <h1 className="text-[28px] font-semibold tracking-tight text-foreground">{title}</h1> : null}
+          {description && <p className="mt-2 max-w-3xl text-[16px] leading-7 text-muted-foreground">{description}</p>}
+        </div>}
         {children}
       </main>
     </div>

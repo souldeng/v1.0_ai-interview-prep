@@ -78,13 +78,13 @@ test("日常切题取消保留草稿，明确新轮次后旧首答仍能从记�
   await confirm.getByRole("button", { name: "继续当前训练", exact: true }).click();
   await expect(page.getByRole("textbox", { name: "本轮回答", exact: true })).toHaveValue("匿名旧首答：先解释概率生成，再说明边界。");
   await daily(page, "Token、上下文窗口");
-  await confirm.getByRole("button", { name: "保存旧轮次并开始", exact: true }).click();
+  await confirm.getByRole("button", { name: "暂存并开始新练习", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Token、上下文窗口和输出长度分别会影响什么？", exact: true })).toBeVisible();
   await page.reload(); await library(page);
   await page.getByRole("button", { name: "整理训练记录", exact: true }).click();
   const cards = page.locator("article");
   await expect(cards).toHaveCount(2);
-  await cards.nth(1).getByRole("button", { name: "查看", exact: true }).click();
+  await cards.nth(1).getByRole("button", { name: "查看复盘", exact: true }).click();
   await expect(page.getByRole("textbox", { name: "本轮回答", exact: true })).toHaveValue("匿名旧首答：先解释概率生成，再说明边界。");
 });
 
@@ -103,7 +103,7 @@ test("日常会话保存失败不假启动，替换失败保留旧草稿，重�
   await daily(page, "Token、上下文窗口");
   await page.evaluate(() => { (window as any).failHistory = true; });
   const confirm = page.getByRole("dialog", { name: "开始新一轮训练" });
-  await confirm.getByRole("button", { name: "保存旧轮次并开始", exact: true }).click();
+  await confirm.getByRole("button", { name: "暂存并开始新练习", exact: true }).click();
   await expect(confirm).toBeVisible();
   await expect(page.getByRole("alert").filter({ hasText: "匿名会话写入失败" })).toBeVisible();
   await confirm.getByRole("button", { name: "继续当前训练", exact: true }).click();

@@ -1,4 +1,5 @@
-import type { InterviewProject, InterviewSession, Preparation, UserProfile } from "./domain";
+import { experienceSource } from "./interviewContext";
+import type { CoachFeedback, InterviewProject, InterviewSession, Preparation, UserProfile } from "./domain";
 import type { StorageLike } from "./projectStorage";
 import { validProject, validSession } from "./validation";
 import { DRAFT_KEY, MAX_DRAFT_BYTES } from "./drafts";
@@ -6,39 +7,61 @@ import { emptyUserProfile, PROFILE_KEY, validUserProfile } from "./profileStorag
 import { emptyQuestionLibrary, MAX_QUESTION_LIBRARY_BYTES, QUESTION_LIBRARY_KEY, validQuestionLibrary, type QuestionLibraryState } from "./questionLibrary";
 import { experienceVersion, type ExperiencePracticeSet } from "./experiencePractice";
 import type { MaterialCollection } from "./materialCollection";
+import { resumePracticeSetVersion, resumeSourceVersion, type ConfirmedResumePracticeSet } from "./confirmedResumePractice";
 
 const PROJECT_KEY = "ai-interview-projects-v1";
 const HISTORY_KEY = "ai-interview-prep-history-v1";
+export const MAX_BACKUP_BYTES = 5 * 1024 * 1024;
 type BackupV1 = { format: "ai-interview-prep-backup"; version: 1; exportedAt: string; projects: InterviewProject[]; history: InterviewSession[]; drafts: Record<string, string>; };
 type BackupV2 = Omit<BackupV1, "version"> & { version: 2; profile: UserProfile; };
 type BackupV3 = Omit<BackupV2, "version"> & { version: 3; library: QuestionLibraryState; };
 export type Backup = BackupV1 | BackupV2 | BackupV3;
+type BackupEnvelope = { format: "ai-interview-prep-backup"; version: 1 | 2 | 3; exportedAt: string; projects: InterviewProject[]; history: InterviewSession[]; drafts: Record<string, string>; profile?: unknown; library?: unknown; };
 
-function validCore(value: any): boolean {
-  return value?.format === "ai-interview-prep-backup" && (value.version === 1 || value.version === 2 || value.version === 3)
-    && Array.isArray(value.projects) && value.projects.every(validProject) && Array.isArray(value.history) && value.history.every(validSession)
-    && value.drafts && typeof value.drafts === "object" && !Array.isArray(value.drafts) && Object.values(value.drafts).every(item => typeof item === "string")
-    && new Set(value.projects.map((project: InterviewProject) => project.id)).size === value.projects.length
-    && new Set(value.history.map((session: InterviewSession) => session.id)).size === value.history.length;
+function validCore(value: unknown): value is BackupEnvelope {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const core = value as Record<string, unknown>;
+  const projects = core.projects, history = core.history, drafts = core.drafts, version = core.version;
+  if (core.format !== "ai-interview-prep-backup" || (version !== 1 && version !== 2 && version !== 3)
+    || !Array.isArray(projects) || !projects.every(validProject)
+    || !Array.isArray(history) || !history.every(validSession)
+    || !drafts || typeof drafts !== "object" || Array.isArray(drafts)
+    || !Object.values(drafts).every(item => typeof item === "string")) return false;
+  const projectItems = projects as InterviewProject[], historyItems = history as InterviewSession[];
+  return new Set(projectItems.map(project => project.id)).size === projectItems.length
+    && new Set(historyItems.map(session => session.id)).size === historyItems.length;
 }
 
 export function parseBackup(text: string): Backup {
-  if (new Blob([text]).size > 5 * 1024 * 1024) throw new Error("备份超过 5MB 上限。");
-  const backup = JSON.parse(text);
-  if (!validCore(backup) || (backup.version >= 2 && !validUserProfile(backup.profile)) || (backup.version === 3 && !validQuestionLibrary(backup.library))) throw new Error("备份格式或内部材料无效，未写入任何数据。");
-  return backup;
+  if (new Blob([text]).size > MAX_BACKUP_BYTES) throw new Error("备份超过 5MB 上限。");
+  let value: unknown;
+  try { value = JSON.parse(text); }
+  catch { throw new Error("备份不是有效的 JSON 文件，未写入任何数据。"); }
+  if (value && typeof value === "object" && !Array.isArray(value) && "format" in value && value.format === "ai-interview-prep-backup" && "version" in value && typeof value.version === "number" && value.version !== 1 && value.version !== 2 && value.version !== 3) {
+    throw new Error(`不支持备份版本 ${String(value.version)}，未写入任何数据。`);
+  }
+  if (!validCore(value)) throw new Error("备份格式或内部材料无效，未写入任何数据。");
+  if (value.version === 1) return { format: value.format, version: 1, exportedAt: value.exportedAt, projects: value.projects, history: value.history, drafts: value.drafts };
+  if (!validUserProfile(value.profile)) throw new Error("备份格式或个人资料无效，未写入任何数据。");
+  if (value.version === 2) return { format: value.format, version: 2, exportedAt: value.exportedAt, projects: value.projects, history: value.history, drafts: value.drafts, profile: value.profile };
+  if (!validQuestionLibrary(value.library)) throw new Error("备份格式或题库资料无效，未写入任何数据。");
+  return { format: value.format, version: 3, exportedAt: value.exportedAt, projects: value.projects, history: value.history, drafts: value.drafts, profile: value.profile, library: value.library };
 }
 
 export function exportBackup(storage: StorageLike = localStorage): string {
   const rawProfile = storage.getItem(PROFILE_KEY); const rawLibrary = storage.getItem(QUESTION_LIBRARY_KEY);
+  const storedProfile = rawProfile ? JSON.parse(rawProfile) as UserProfile : emptyUserProfile();
   const backup: BackupV3 = {
     format: "ai-interview-prep-backup", version: 3, exportedAt: new Date().toISOString(),
     projects: JSON.parse(storage.getItem(PROJECT_KEY) || "[]"), history: JSON.parse(storage.getItem(HISTORY_KEY) || "[]"), drafts: JSON.parse(storage.getItem(DRAFT_KEY) || "{}"),
-    profile: rawProfile ? JSON.parse(rawProfile) : emptyUserProfile(),
+    // AI candidates remain local recovery state until a user explicitly confirms or saves them.
+    profile: { ...storedProfile, experienceCandidates: undefined },
     library: rawLibrary ? JSON.parse(rawLibrary) : emptyQuestionLibrary(),
   };
-  // Export exact stored data, including damaged records for recovery. Import validates strictly.
-  return JSON.stringify(backup, null, 2);
+  // Export exact formal data, including damaged records for recovery. Import validates strictly.
+  const encoded = JSON.stringify(backup, null, 2);
+  if (new Blob([encoded]).size > MAX_BACKUP_BYTES) throw new Error("备份超过 5MB 上限，未生成文件；现有数据未修改。请先缩减导出范围或保留原始附件。");
+  return encoded;
 }
 
 function remapRecordedId(id: string, ids: Map<string, string>): string {
@@ -53,7 +76,7 @@ function remapLibraryKey(key: string, ids: Map<string, string>, recordedIds: Map
   return null;
 }
 
-function mergeQuestionLibrary(current: QuestionLibraryState, incoming: QuestionLibraryState, ids: Map<string, string>, recordedIds: Map<string, string>, experienceSets: ExperiencePracticeSet[], collection?: MaterialCollection): QuestionLibraryState {
+function mergeQuestionLibrary(current: QuestionLibraryState, incoming: QuestionLibraryState, ids: Map<string, string>, recordedIds: Map<string, string>, importSourceIds: Map<string, string>, experienceSets: ExperiencePracticeSet[], resumeSets: ConfirmedResumePracticeSet[], collection?: MaterialCollection): QuestionLibraryState {
   const favorites = new Set(current.favorites);
   incoming.favorites.map(key => remapLibraryKey(key, ids, recordedIds)).filter((key): key is string => Boolean(key)).forEach(key => favorites.add(key));
   const reuseDrafts = [...current.reuseDrafts, ...incoming.reuseDrafts.flatMap(draft => {
@@ -64,7 +87,9 @@ function mergeQuestionLibrary(current: QuestionLibraryState, incoming: QuestionL
   return { version: 1, favorites: [...favorites], reuseDrafts, foundationReview: { ...(current.foundationReview ?? {}), ...(incoming.foundationReview ?? {}) },
     ...(collection || current.collection ? { collection: { materials: [...(current.collection?.materials ?? []), ...(collection?.materials ?? [])], analyses: [...(current.collection?.analyses ?? []), ...(collection?.analyses ?? [])], extractions: [...(current.collection?.extractions ?? []), ...(collection?.extractions ?? [])], activeMaterialIds: [...(current.collection?.activeMaterialIds ?? current.collection?.materials.map(m=>m.id) ?? []), ...(collection?.activeMaterialIds ?? collection?.materials.map(m=>m.id) ?? [])] } } : {}),
     ...((current.experienceSets || incoming.experienceSets) ? { experienceSets: [...(current.experienceSets ?? []), ...experienceSets] } : {}),
-    ...((current.recordedQuestions || incoming.recordedQuestions) ? { recordedQuestions: [...(current.recordedQuestions ?? []), ...(incoming.recordedQuestions ?? []).map(item => ({ ...item, id: recordedIds.get(item.id)!, projectId: item.projectId ? ids.get(item.projectId) : undefined }))] } : {}) };
+    ...((current.resumeSets || incoming.resumeSets) ? { resumeSets: [...(current.resumeSets ?? []), ...resumeSets] } : {}),
+    ...((current.importSources || incoming.importSources) ? { importSources: [...(current.importSources ?? []), ...(incoming.importSources ?? []).map(source => ({ ...source, id: importSourceIds.get(source.id)! }))] } : {}),
+    ...((current.recordedQuestions || incoming.recordedQuestions) ? { recordedQuestions: [...(current.recordedQuestions ?? []), ...(incoming.recordedQuestions ?? []).map(item => ({ ...item, id: recordedIds.get(item.id)!, projectId: item.projectId ? ids.get(item.projectId) : undefined, importSourceId: item.importSourceId ? importSourceIds.get(item.importSourceId) : undefined }))] } : {}) };
 }
 
 function mergeProfile(current: UserProfile, incoming: UserProfile, ids = new Map<string, string>()): UserProfile {
@@ -89,6 +114,7 @@ export function importBackup(text: string, storage: StorageLike = localStorage):
   const ids = new Map<string, string>();
   const importedId = (value: string) => { if (!ids.has(value)) ids.set(value, `import-${crypto.randomUUID()}`); return ids.get(value)!; };
   const recordedIds = new Map(backup.version === 3 ? (backup.library.recordedQuestions ?? []).map(item => [item.id, `recorded-${crypto.randomUUID()}`]) : []);
+  const importSourceIds = new Map(backup.version === 3 ? (backup.library.importSources ?? []).map(item => [item.id, `import-${crypto.randomUUID()}`]) : []);
   const profile = backup.version === 2 || backup.version === 3 ? mergeProfile(currentProfile, backup.profile, ids) : currentProfile;
   const experienceSets = backup.version === 3 ? (backup.library.experienceSets ?? []).map(set => {
     const setId = `experience-set-${crypto.randomUUID()}`, experienceId = importedId(set.experienceId);
@@ -101,6 +127,29 @@ export function importBackup(text: string, storage: StorageLike = localStorage):
       return { ...q, id, experienceOrigin: { ...q.experienceOrigin!, setId, experienceId, contentVersion } };
     });
     return { ...set, id: setId, experienceId, contentVersion, questions, ...(set.hiddenQuestionIds ? { hiddenQuestionIds: set.hiddenQuestionIds.map(id => recordedIds.get(id)!) } : {}) };
+  }) : [];
+  const resumeOrigins = new Map<string, NonNullable<Preparation["questions"][number]["resumePracticeOrigin"]>>();
+  const resumeSets = backup.version === 3 ? (backup.library.resumeSets ?? []).map(set => {
+    const setId = `resume-set-${crypto.randomUUID()}`;
+    const sources = set.sources.map(source => {
+      const experienceId = importedId(source.experienceId);
+      const originalCard = backup.profile.experiences.find(card => card.id === source.experienceId);
+      const copyCard = profile.experiences.find(card => card.id === experienceId);
+      const contentVersion = originalCard && copyCard && (resumeSourceVersion(originalCard) === source.contentVersion || experienceVersion(originalCard) === source.contentVersion) ? resumeSourceVersion(copyCard) : source.contentVersion;
+      return { ...source, experienceId, contentVersion };
+    });
+    const sourceVersion = new Map(sources.map(source => [source.experienceId, source.contentVersion]));
+    const questions = set.questions.map((question, index) => {
+      const id = `${setId}-q${index + 1}`; recordedIds.set(question.id, id);
+      const origin = question.resumePracticeOrigin!;
+      const mappedOrigin = { ...origin, setId, evidence: origin.evidence.map(evidence => {
+        const experienceId = importedId(evidence.experienceId);
+        return { ...evidence, experienceId, contentVersion: sourceVersion.get(experienceId) ?? evidence.contentVersion };
+      }) };
+      resumeOrigins.set(question.id, mappedOrigin);
+      return { ...question, id, resumePracticeOrigin: mappedOrigin };
+    });
+    return { ...set, id: setId, contentVersion: resumePracticeSetVersion(sources), sources, questions, ...(set.hiddenQuestionIds ? { hiddenQuestionIds: set.hiddenQuestionIds.map(id => recordedIds.get(id)!) } : {}) };
   }) : [];
   const incomingCollection = backup.version === 3 ? backup.library.collection : undefined;
   const version = (original: string) => { const [text, group, order] = JSON.parse(original); return JSON.stringify([text, group ? importedId(group) : "", order ?? 0]); };
@@ -122,16 +171,30 @@ export function importBackup(text: string, storage: StorageLike = localStorage):
     }),
   } : undefined;
   const question = (item: Preparation["questions"][number]) => {
-    const copySet = experienceSets.find(set => set.questions.some(q => q.id === remapRecordedId(item.id.replace(/(?:-followup)+$/, ""), recordedIds)));
-    return { ...item, id: remapRecordedId(item.id, recordedIds), ...(item.collectionOrigin ? { collectionOrigin: { ...item.collectionOrigin, materialId: importedId(item.collectionOrigin.materialId), analysisId: importedId(item.collectionOrigin.analysisId), contentVersion: version(item.collectionOrigin.contentVersion) } } : {}), ...(item.experienceOrigin && copySet ? { experienceOrigin: { ...item.experienceOrigin, setId: copySet.id, experienceId: copySet.experienceId, contentVersion: copySet.contentVersion } } : {}) };
+    const originalQuestionId = item.id.replace(/(?:-followup)+$/, "");
+    const copySet = experienceSets.find(set => set.questions.some(q => q.id === remapRecordedId(originalQuestionId, recordedIds)));
+    const resumeOrigin = resumeOrigins.get(originalQuestionId);
+    const origin = item.projectDeepDive;
+    const originalCard = origin && backup.version !== 1 ? backup.profile.experiences.find(c => c.id === origin.experienceId) : undefined;
+    const copyCard = originalCard ? profile.experiences.find(c => c.id === importedId(originalCard.id)) : undefined;
+    const deep = origin ? { ...origin, experienceId: importedId(origin.experienceId), experienceSnapshot: originalCard && copyCard && JSON.stringify(experienceSource(originalCard)) === origin.experienceSnapshot ? JSON.stringify(experienceSource(copyCard)) : origin.experienceSnapshot } : undefined;
+    return { ...item, ...(deep ? { projectDeepDive: deep } : {}), id: remapRecordedId(item.id, recordedIds), ...(item.collectionOrigin ? { collectionOrigin: { ...item.collectionOrigin, materialId: importedId(item.collectionOrigin.materialId), analysisId: importedId(item.collectionOrigin.analysisId), contentVersion: version(item.collectionOrigin.contentVersion) } } : {}), ...(item.experienceOrigin && copySet ? { experienceOrigin: { ...item.experienceOrigin, setId: copySet.id, experienceId: copySet.experienceId, contentVersion: copySet.contentVersion } } : {}), ...(item.resumePracticeOrigin && resumeOrigin ? { resumePracticeOrigin: resumeOrigin } : {}) };
   };
-  const preparation = (value: Preparation): Preparation => recordedIds.size ? { ...value, questions: value.questions.map(question) } : value;
-  const session = (value: InterviewSession) => ({ ...value, id: importedId(value.id), ...(recordedIds.size ? {
+  // 岗位归属（可选）随会话一起恢复：目标是备份内的岗位时改写为导入副本的 id，否则整对丢弃，避免悬空引用。
+  const backupProjectIds = new Set((backup.projects ?? []).map(project => project.id));
+  const preparation = (value: Preparation): Preparation => {
+    const owner = value.job?.projectId;
+    const mapped = owner && backupProjectIds.has(owner) ? importedId(owner) : undefined;
+    const job = mapped ? { ...value.job, projectId: mapped } : { ...value.job, projectId: undefined, projectName: undefined };
+    return { ...value, job, questions: value.questions.map(question) };
+  };
+  const feedback = (value: CoachFeedback): CoachFeedback => ({ ...value, ...(value.referenceBasis ? { referenceBasis: value.referenceBasis.map(b => ({ ...b, experienceId: importedId(b.experienceId) })) } : {}) });
+  const session = (value: InterviewSession) => ({ ...value, id: importedId(value.id),
     preparation: preparation(value.preparation), questions: value.questions.map(question),
-    turns: value.turns.map(turn => ({ ...turn, questionId: remapRecordedId(turn.questionId, recordedIds) })),
-  } : {}) });
+    turns: value.turns.map(turn => ({ ...turn, questionId: remapRecordedId(turn.questionId, recordedIds), ...(turn.aiCoach ? { aiCoach: feedback(turn.aiCoach) } : {}), ...(turn.coachReviews ? { coachReviews: turn.coachReviews.map(r => ({ ...r, feedback: feedback(r.feedback) })) } : {}) })),
+  });
   const projects = [...currentCore.projects, ...backup.projects.map(project => ({ ...project, id: importedId(project.id), company: project.company, jobTitle: `${project.jobTitle}（导入副本）`,
-    ...(recordedIds.size ? { questions: project.questions.map(item => ({ ...item, id: remapRecordedId(item.id, recordedIds) })), ...(project.preparation ? { preparation: preparation(project.preparation) } : {}) } : {}),
+    questions: project.questions.map(item => ({ ...item, id: remapRecordedId(item.id, recordedIds) })), ...(project.preparation ? { preparation: preparation(project.preparation) } : {}),
     materials: project.materials?.map(material => ({ ...material, projectId: importedId(project.id), ...(material.collectionSourceId ? { collectionSourceId: importedId(material.collectionSourceId) } : {}), fileId: undefined, originalSaved: false,
       parts: material.parts?.map(part => ({ ...part, fileId: undefined, originalSaved: false })) })),
     ...(project.session ? { session: session(project.session) } : {}) }))];
@@ -143,15 +206,21 @@ export function importBackup(text: string, storage: StorageLike = localStorage):
     else if (key === "create") { if (drafts.create && drafts.create !== value) drafts[`recovered:${crypto.randomUUID()}:create`] = value; else drafts.create = value; }
     else if (value) drafts[`recovered:${crypto.randomUUID()}:${key}`] = value;
   }
-  const library = backup.version === 3 ? mergeQuestionLibrary(currentLibrary, backup.library, ids, recordedIds, experienceSets, collection) : currentLibrary;
+  const library = backup.version === 3 ? mergeQuestionLibrary(currentLibrary, backup.library, ids, recordedIds, importSourceIds, experienceSets, resumeSets, collection) : currentLibrary;
   if (!validQuestionLibrary(library)) throw new Error("导入后的题库或资料关联无效，原数据未改变。");
   if (projects.length > 20 || history.length > 20) throw new Error("导入后将超过 20 个项目或训练记录上限；原数据未改变。");
   const values = [JSON.stringify(projects), JSON.stringify(history), JSON.stringify(drafts), JSON.stringify(profile), JSON.stringify(library)];
   if (values.some((value, index) => new Blob([value]).size > (index === 2 ? MAX_DRAFT_BYTES : index === 4 ? MAX_QUESTION_LIBRARY_BYTES : 2 * 1024 * 1024))) throw new Error("导入后超过本地容量上限，原数据未改变。");
   const written: typeof old = [];
-  try { old.forEach((entry, index) => { storage.setItem(entry.key, values[index]); written.push(entry); }); }
+  try {
+    old.forEach((entry, index) => { storage.setItem(entry.key, values[index]); written.push(entry); });
+    if (old.some((entry, index) => storage.getItem(entry.key) !== values[index])) throw new Error("写入后核对失败。");
+  }
   catch {
-    try { for (const entry of written.reverse()) entry.raw === null ? storage.removeItem(entry.key) : storage.setItem(entry.key, entry.raw); }
+    try {
+      for (const entry of [...written].reverse()) entry.raw === null ? storage.removeItem(entry.key) : storage.setItem(entry.key, entry.raw);
+      if (written.some(entry => storage.getItem(entry.key) !== entry.raw)) throw new Error("回滚后核对失败。");
+    }
     catch { throw new Error("导入失败且回滚未完成，请保留备份并停止继续操作。"); }
     throw new Error("导入失败，已回滚本次写入。请检查浏览器存储空间。");
   }

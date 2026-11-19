@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createExperienceSet, currentExperienceSet, experiencePracticeContext } from "./experiencePractice";
+import { clearPendingExperiencePracticeSet, createExperienceSet, currentExperienceSet, experiencePracticeContext, isPendingExperiencePracticeSetCurrent, loadPendingExperiencePracticeSet, savePendingExperiencePracticeSet } from "./experiencePractice";
 import { emptyQuestionLibrary, loadQuestionLibrary, saveQuestionLibrary } from "./questionLibrary";
 import { emptyUserProfile } from "./profileStorage";
 import type { ExperienceCard } from "./domain";
@@ -34,6 +34,34 @@ test("专项点评保留所选经历末尾责任边界，不因前段较长而�
   const long = { ...card, situation: "匿名业务背景。".repeat(200) };
   const set = createExperienceSet(long, questions);
   assert.match(experiencePracticeContext({ ...emptyUserProfile(), experiences: [long] }, set.questions[0]).confirmedUserFacts.join("\n"), /没有负责模型研发或上线/);
+});
+
+test("专项题逐题筛选，稳定字段引用可保存三道合格题而不编造依据", () => {
+  const result = createExperienceSet(card, [
+    { text: "你如何开展客户需求访谈？", basisField: "action" },
+    { text: "需求清单形成前，你如何确认边界？", basisField: "result", basisQuote: "形成需求清单" },
+    { text: "这段经历带来了什么复盘？", basisField: "reflection" },
+    { text: "这段经历带来了什么复盘？", basisField: "reflection" },
+    { text: "你如何完成上线？", basisField: "tools" },
+  ]);
+  assert.equal(result.questions.length, 3);
+  assert.ok(result.generationIssues?.some(issue => issue.reason === "duplicate"));
+  assert.ok(result.generationIssues?.some(issue => issue.reason === "evidence"));
+  assert.ok(result.questions.every(question => question.experienceOrigin?.basisQuote && [card.situation, card.action, card.result, card.reflection].some(source => source.includes(question.experienceOrigin!.basisQuote))));
+});
+
+test("未保存的单段经历候选题组可在刷新后恢复，且确认事实变化后不能重试保存", () => {
+  const values = new Map<string, string>();
+  const storage = { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => { values.set(key, value); }, removeItem: (key: string) => { values.delete(key); } };
+  const set = createExperienceSet(card, questions);
+  savePendingExperiencePracticeSet(set, storage);
+  const restored = loadPendingExperiencePracticeSet(storage);
+  assert.equal(restored?.id, set.id);
+  const profile = { ...emptyUserProfile(), experiences: [card] };
+  assert.equal(isPendingExperiencePracticeSetCurrent(profile, restored!), true);
+  assert.equal(isPendingExperiencePracticeSetCurrent({ ...profile, experiences: [{ ...card, action: "已修改的本人行动" }] }, restored!), false);
+  clearPendingExperiencePracticeSet(storage);
+  assert.equal(loadPendingExperiencePracticeSet(storage), null);
 });
 
 test("题组随原备份恢复为独立副本且训练指向副本经历；损坏题组拒绝覆盖", () => {
